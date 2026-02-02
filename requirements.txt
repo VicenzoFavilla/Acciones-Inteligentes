@@ -6,3 +6,7 @@ pandas
 numpy
 xgboost
 joblib
+fastapi
+uvicorn
+pytest
+httpx

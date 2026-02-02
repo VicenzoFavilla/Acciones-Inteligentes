@@ -6,3 +6,6 @@ ml/__pycache__
 
 services/__pycache__
 models/
+ai/
+venv/
+.env

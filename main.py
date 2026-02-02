@@ -5,9 +5,87 @@ Permite consultar un ticker, ver datos básicos y usar modelos ML
 """
 
 from services.stocks import get_stock_info, get_price_history
-from ml.recomendacion import basic_recommendation, smart_recommendation
+from ml.recomendacion import smart_recommendation, basic_recommendation
 from config.db import get_db
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pymongo import MongoClient
+import joblib
 
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+client= MongoClient("mongodb://localhost:27017")
+db = client["acciones"]
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "API de Acciones Inteligentes funcionando correctamente"
+        }
+
+@app.post("/recomendacion")
+def recomendacion(ticker: str):
+    info = get_stock_info(ticker)
+    if not info:
+        return {"error": "No se pudo obtener información para el ticker"}
+    nombre = info.get("name", ticker)
+    recomendacion = basic_recommendation(info.get("change"))
+    return {"ticker": ticker, "nombre": nombre, "recomendacion": recomendacion}
+
+
+@app.get("/predict/{ticker}")
+def predict(ticker: str, model: str = "local_xgb", threshold: float = 0.5):
+    res = smart_recommendation(ticker=ticker, model_type=model, prob_threshold=threshold)
+    info = get_stock_info(ticker.upper())
+    
+    # Obtener historial para la gráfica
+    history_series = get_price_history(ticker.upper(), period="1mo")
+    history_data = []
+    if history_series is not None:
+        history_data = history_series.tolist()
+
+    return {
+        "ticker": ticker.upper(),
+        "nombre": info.get("name", ticker) if info else ticker,
+        "recomendacion": res,
+        "precio": info.get("price") if info else None,
+        "variacion": info.get("change") if info else None,
+        "volumen": info.get("volume") if info else None,
+        "history": history_data
+    }
+
+from pydantic import BaseModel
+
+class DecisionRequest(BaseModel):
+    ticker: str
+    decision: str
+
+@app.post("/decision")
+def save_decision(req: DecisionRequest):
+    """Guarda la decisión del usuario (Comprar/No Comprar) en la BD."""
+    db = get_db()
+    
+    # Actualizamos el registro más reciente de este ticker que no tenga decisión
+    # Esto asume que el usuario acaba de pedir una predicción.
+    result = db.acciones_usuario.update_one(
+        {"ticker": req.ticker, "decision_usuario": None},
+        {"$set": {"decision_usuario": req.decision}}
+    )
+    
+    if result.modified_count == 0:
+        # Si no encontró uno pendiente, quizás es un registro nuevo directo (opcional)
+        # Por ahora devolvemos mensaje informativo
+        return {"status": "info", "message": "No se encontró predicción pendiente o ya fue actualizada."}
+        
+    return {"status": "success", "message": "Decisión registrada correctamente."}
 
 def main():
     """Bucle principal de interacción por consola."""
