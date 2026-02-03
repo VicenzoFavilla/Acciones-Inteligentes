@@ -31,6 +31,16 @@ def read_root():
         "message": "API de Acciones Inteligentes funcionando correctamente"
         }
 
+
+@app.get("/user/{email}")
+def get_user(email: str):
+    user = db.users.find_one({"email": email})
+    if user:
+        return {"status": "success", "user": user}
+    else:
+        return {"status": "error", "message": "Usuario no encontrado"}
+
+
 @app.post("/recomendacion")
 def recomendacion(ticker: str):
     info = get_stock_info(ticker)
@@ -63,6 +73,47 @@ def predict(ticker: str, model: str = "local_xgb", threshold: float = 0.5):
     }
 
 from pydantic import BaseModel
+import hashlib
+
+# --- MODELO DE USUARIO ---
+class User(BaseModel):
+    email: str
+    password: str
+
+# --- UTILS CRYPTO ---
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# --- RUTAS DE AUTH ---
+@app.post("/register")
+def register(user: User):
+    db_conn = get_db()
+    
+    # Verificar si existe
+    if db_conn.users.find_one({"email": user.email}):
+        return {"status": "error", "message": "El usuario ya existe"}
+    
+    # Hashear password y guardar
+    new_user = {
+        "email": user.email,
+        "password": hash_password(user.password)
+    }
+    db_conn.users.insert_one(new_user)
+    return {"status": "success", "message": "Usuario registrado exitosamente"}
+
+@app.post("/login")
+def login(user: User):
+    db_conn = get_db()
+    
+    existing_user = db_conn.users.find_one({"email": user.email})
+    if not existing_user:
+        return {"status": "error", "message": "Credenciales inválidas"}
+    
+    if existing_user["password"] == hash_password(user.password):
+        return {"status": "success", "message": "Login exitoso", "email": user.email}
+    else:
+        return {"status": "error", "message": "Credenciales inválidas"}
+
 
 class DecisionRequest(BaseModel):
     ticker: str

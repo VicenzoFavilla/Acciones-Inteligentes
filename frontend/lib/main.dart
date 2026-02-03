@@ -1,16 +1,21 @@
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-// Importamos fl_chart para las gráficas
 import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'screens/profile_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/premium_screen.dart';
+import 'screens/faq_screen.dart';
+import 'screens/login.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  final email = prefs.getString('user_email');
+  runApp(MyApp(initialEmail: email));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final String? initialEmail;
+  const MyApp({super.key, this.initialEmail});
 
   @override
   Widget build(BuildContext context) {
@@ -21,7 +26,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         textTheme: GoogleFonts.poppinsTextTheme(),
       ),
-      home: const MainDashboard(),
+      home: initialEmail != null ? const MainDashboard() : const LoginScreen(),
     );
   }
 }
@@ -35,7 +40,33 @@ class MainDashboard extends StatefulWidget {
 }
 
 class _MainDashboardState extends State<MainDashboard> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _tickerController = TextEditingController();
+  String? _userEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserEmail();
+  }
+
+  Future<void> _loadUserEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userEmail = prefs.getString('user_email');
+    });
+  }
+
+  Future<void> _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_email');
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+    }
+  }
 
   // Lista de populares con datos de ejemplo para la gráfica (7 puntos de precio)
   final List<Map<String, dynamic>> popularStocks = [
@@ -65,7 +96,9 @@ class _MainDashboardState extends State<MainDashboard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: const Color(0xFFF5F7FA),
+      drawer: _buildDrawer(),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 25.0),
@@ -73,9 +106,18 @@ class _MainDashboardState extends State<MainDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 30),
-              Text(
-                "Acciones Inteligentes",
-                style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu, size: 30, color: Colors.black87),
+                    onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Acciones Inteligentes",
+                    style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
               Text(
@@ -110,6 +152,86 @@ class _MainDashboardState extends State<MainDashboard> {
               const SizedBox(height: 20),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      child: Container(
+        color: const Color(0xFFB0B0B0), // Grey background similar to the image
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            const SizedBox(height: 60),
+            // Profile Section
+            Center(
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ProfileScreen()),
+                  );
+                },
+                child: Column(
+                  children: [
+                    const Icon(Icons.account_circle_outlined, size: 80, color: Colors.black87),
+                    const SizedBox(height: 10),
+                    Text(
+                      _userEmail ?? 'Nombre de perfil',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 40),
+            // Menu Items
+            ListTile(
+              leading: const Icon(Icons.settings_outlined, color: Colors.black87, size: 30),
+              title: Text('Configuración', style: GoogleFonts.poppins(color: Colors.black87, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.workspace_premium, color: Colors.black87, size: 30),
+              title: Text('Premium', style: GoogleFonts.poppins(color: Colors.black87, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const PremiumScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help_outline, color: Colors.black87, size: 30),
+              title: Text('Preguntas frecuentes', style: GoogleFonts.poppins(color: Colors.black87, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const FAQScreen()),
+                );
+              },
+            ),
+            const Divider(color: Colors.black26),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.redAccent, size: 30),
+              title: Text('Cerrar Sesión', style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 16)),
+              onTap: _logout,
+            ),
+          ],
         ),
       ),
     );
