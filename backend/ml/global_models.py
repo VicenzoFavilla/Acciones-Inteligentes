@@ -71,6 +71,7 @@ def train_or_update_xgb_global(tickers: List[str], period: str = "2y", model_pat
         objective="binary:logistic",
         eval_metric="auc",
         scale_pos_weight=spw,
+        early_stopping_rounds=50,
         random_state=42,
     )
 
@@ -89,7 +90,6 @@ def train_or_update_xgb_global(tickers: List[str], period: str = "2y", model_pat
         X_train,
         y_train,
         eval_set=[(X_val, y_val)],
-        early_stopping_rounds=50,
         verbose=False,
         xgb_model=prev_booster,
     )
@@ -115,16 +115,19 @@ def train_or_update_mlp_global(tickers: List[str], period: str = "2y", model_pat
         pipe = None
 
     if pipe is None:
+        # Ajustamos batch_size inicial; fit lo sobreescribirá abajo si es necesario
         mlp = MLPClassifier(hidden_layer_sizes=(64, 32), activation="relu", solver="adam", alpha=1e-4,
-                            batch_size=128, learning_rate_init=1e-3, max_iter=50, warm_start=True, random_state=42)
+                            batch_size=min(128, len(X)), learning_rate_init=1e-3, max_iter=50, warm_start=True, random_state=42)
         pipe = Pipeline([
             ("scaler", StandardScaler()),
             ("mlp", mlp),
         ])
     else:
-        # asegurar warm_start activo
-        if hasattr(pipe.named_steps.get("mlp"), "warm_start"):
-            pipe.named_steps["mlp"].warm_start = True
+        # asegurar warm_start activo y ajustar batch_size según datos actuales
+        mlp = pipe.named_steps.get("mlp")
+        if mlp:
+            mlp.warm_start = True
+            mlp.batch_size = min(128, len(X))
 
     pipe.fit(X, y)
 
@@ -135,11 +138,16 @@ def train_or_update_mlp_global(tickers: List[str], period: str = "2y", model_pat
 
 
 def tickers_from_usage(limit: int = 20) -> List[str]:
-    """Obtiene tickers más consultados desde la colección modelos_uso."""
+    """Obtiene tickers más consultados desde la colección modelos_uso.
+    Si la BD está vacía, devuelve una lista por defecto para permitir el entrenamiento.
+    """
     db = get_db()
+    DEFAULT_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA"]
     try:
         cur = db.modelos_uso.find({}).sort("ultima_vez", -1).limit(limit)
         tks = [d.get("ticker") for d in cur if d.get("ticker")]
+        if not tks:
+            return DEFAULT_TICKERS
         return list({t for t in tks})  # únicos
     except Exception:
-        return ["AAPL", "KO", "NVDA"]
+        return DEFAULT_TICKERS

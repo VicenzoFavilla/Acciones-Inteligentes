@@ -1,7 +1,11 @@
 """Script utilitario: verifica conexión y estado de colecciones en MongoDB."""
 
 import sys
+import os
 from datetime import datetime
+
+# Asegurar que el directorio raíz del backend esté en el path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from pymongo import MongoClient

@@ -56,6 +56,7 @@ def train_buy_model_optimizado(ticker="AAPL", periodo="6m"):
         objective="binary:logistic",
         eval_metric="auc",
         scale_pos_weight=scale_pos_weight,
+        early_stopping_rounds=50,
         random_state=42,
     )
 
@@ -64,7 +65,6 @@ def train_buy_model_optimizado(ticker="AAPL", periodo="6m"):
         y_train,
         eval_set=[(X_val, y_val)],
         verbose=False,
-        early_stopping_rounds=50,
     )
 
     y_pred = model.predict(X_val)

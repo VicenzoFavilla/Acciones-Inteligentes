@@ -1,6 +1,11 @@
 """Actualiza modelos globales (XGB y MLP) con tickers recientes o provistos."""
 
 import argparse
+import sys
+import os
+
+# Asegurar que el directorio raíz del backend esté en el path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ml.global_models import train_or_update_xgb_global, train_or_update_mlp_global, tickers_from_usage
 

@@ -4,15 +4,19 @@ Para cada documento sin y_true, descarga el cierre del día siguiente y marca
 y_true=1 si Close_{t+1} > Close_t * 1.01, si no y_true=0.
 """
 
+import sys
+import os
 from datetime import timedelta
 
+# Asegurar que el directorio raíz del backend esté en el path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import yfinance as yf
-from pymongo import MongoClient
+from config.db import get_db
 
 
 def main():
-    client = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=3000)
-    db = client["acciones_ml"]
+    db = get_db()
 
     cur = db.acciones_usuario.find({"y_true": {"$exists": False}}).sort("fecha", 1)
     updated = 0

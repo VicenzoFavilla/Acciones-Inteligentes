@@ -6,11 +6,23 @@ Permite consultar un ticker, ver datos básicos y usar modelos ML
 
 from services.stocks import get_stock_info, get_price_history
 from ml.recomendacion import smart_recommendation, basic_recommendation
+from ml.global_models import tickers_from_usage
+
+from services.stocks import get_stock_info, get_price_history
 from config.db import get_db
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 import joblib
+import pandas as pd
+import warnings
+
+# Silenciar ruidos de versión de scikit-learn
+try:
+    from sklearn.exceptions import InconsistentVersionWarning
+    warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
+except ImportError:
+    pass
 
 
 app = FastAPI()
@@ -18,12 +30,14 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-client= MongoClient("mongodb://localhost:27017")
-db = client["acciones"]
+# client= MongoClient("mongodb://localhost:27017")
+# db = client["acciones"]
+db = get_db()
 
 @app.get("/")
 def read_root():
@@ -34,7 +48,8 @@ def read_root():
 
 @app.get("/user/{email}")
 def get_user(email: str):
-    user = db.users.find_one({"email": email})
+    db_conn = get_db()
+    user = db_conn.users.find_one({"email": email})
     if user:
         return {"status": "success", "user": user}
     else:
@@ -52,25 +67,107 @@ def recomendacion(ticker: str):
 
 
 @app.get("/predict/{ticker}")
-def predict(ticker: str, model: str = "local_xgb", threshold: float = 0.5):
-    res = smart_recommendation(ticker=ticker, model_type=model, prob_threshold=threshold)
-    info = get_stock_info(ticker.upper())
-    
-    # Obtener historial para la gráfica
-    history_series = get_price_history(ticker.upper(), period="1mo")
-    history_data = []
-    if history_series is not None:
-        history_data = history_series.tolist()
+def predict_stock(ticker: str):
+    ticker_up = ticker.upper()
+    try:
+        # Intentamos obtener la recomendación inteligente
+        # Si el modelo no existe, smart_recommendation debería manejarlo,
+        # pero lo envolvemos por seguridad.
+        try:
+            ml_res = smart_recommendation(ticker_up, registrar=True, model_type="global_xgb")
+        except Exception as e:
+            print(f"IA Error: {e}")
+            ml_res = "Analizando..." # Valor por defecto si falla el .pkl
 
-    return {
-        "ticker": ticker.upper(),
-        "nombre": info.get("name", ticker) if info else ticker,
-        "recomendacion": res,
-        "precio": info.get("price") if info else None,
-        "variacion": info.get("change") if info else None,
-        "volumen": info.get("volume") if info else None,
-        "history": history_data
-    }
+        info = get_stock_info(ticker_up)
+        history_df = get_price_history(ticker_up, period="30d")
+        
+        # Procesamiento del historial (Asegurando que no sea nulo)
+        history_list = []
+        if history_df is not None and not history_df.empty:
+            # Caso 1: Es un DataFrame (tiene .columns)
+            if hasattr(history_df, "columns"):
+                if isinstance(history_df.columns, pd.MultiIndex):
+                    history_df.columns = history_df.columns.get_level_values(0)
+                
+                col = "Close" if "Close" in history_df.columns else "close"
+                if col in history_df.columns:
+                    history_list = [float(x) for x in history_df[col].dropna().tolist()]
+            # Caso 2: Es una Series (acceso directo)
+            else:
+                history_list = [float(x) for x in history_df.dropna().tolist()]
+
+        return {
+            "ticker": ticker_up,
+            "precio": info.get("price") if info else 0.0,
+            "recomendacion": ml_res,
+            "history": history_list
+        }
+    except Exception as e:
+        print(f"Error general en predict: {e}")
+        # Retornamos algo básico para que Flutter no dé 'Error de conexión'
+        return {
+            "ticker": ticker_up, 
+            "precio": 0.0, 
+            "recomendacion": "Servidor en mantenimiento", 
+            "history": []
+        }
+
+
+@app.get("/popular")
+def get_popular_stocks():
+    top_tickers = tickers_from_usage(limit=5)
+    if not top_tickers:
+        top_tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+
+    lista_populares = []
+    for ticker in top_tickers:
+        info = get_stock_info(ticker)
+        if info:
+            # Obtenemos los datos una sola vez
+            history_data = get_price_history(ticker, period="7d")
+            history_list = []
+
+            if history_data is not None and not history_data.empty:
+                # Caso 1: Es un DataFrame (tiene .columns)
+                if hasattr(history_data, "columns"):
+                    # Aplanamos si es MultiIndex
+                    if isinstance(history_data.columns, pd.MultiIndex):
+                        history_data.columns = history_data.columns.get_level_values(0)
+                    
+                    # Usamos "Close" con C mayúscula
+                    if "Close" in history_data.columns:
+                        history_list = history_data["Close"].tolist()
+                
+                # Caso 2: Es una Series (acceso directo)
+                else:
+                    history_list = history_data.tolist()
+
+            # Limpiamos valores NaN para que JSON no falle
+            history_list = [x for x in history_list if str(x) != 'nan']
+
+            lista_populares.append({
+                "ticker": ticker, # Corregido: antes decía 't'
+                "nombre": info.get("name", ticker),
+                "precio": info.get("price"),
+                "variacion": info.get("change"),
+                "color_green": (info.get("change") or 0) >= 0,
+                "history": history_list # Usamos la lista que ya procesamos arriba
+            })
+            
+    return lista_populares
+
+    
+@app.get("/feedback")
+def save_user_decision(ticker: str, decision: str):
+    db = get_db()
+    result = db.acciones_usuario.update_one(
+        {"ticker": ticker, "decision_usuario": None},
+        {"$set": {"decision_usuario": decision}},
+        sort=[("fecha", -1)]
+    )
+    return {"status": "success", "message": "Decisión guardada correctamente"}
+
 
 from pydantic import BaseModel
 import hashlib

@@ -1,12 +1,17 @@
 """Script de mantenimiento: crea índices y limpia colecciones extra."""
 
-from pymongo import MongoClient, ASCENDING, DESCENDING
+import sys
+import os
+from pymongo import ASCENDING, DESCENDING
+
+# Asegurar que el directorio raíz del backend esté en el path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config.db import get_db
 
 
 def main():
-    client = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=3000)
-    client.server_info()
-    db = client["acciones_ml"]
+    db = get_db()
 
     # Crear índices
     db.history.create_index([("ticker", ASCENDING), ("timestamp", DESCENDING)], name="idx_ticker_timestamp")

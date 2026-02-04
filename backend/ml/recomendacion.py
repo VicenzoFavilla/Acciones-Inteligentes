@@ -96,7 +96,7 @@ def smart_recommendation(
     # Datos → features alineadas
     stock = yf.Ticker(ticker)
     data = stock.history(period="2y")
-    if data.empty or len(data) < 20:
+    if data.empty or len(data) < 10:
         return "No hay suficientes datos para predecir."
 
     df = add_basic_features(data.copy())
