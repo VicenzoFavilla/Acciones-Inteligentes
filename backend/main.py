@@ -35,8 +35,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# client= MongoClient("mongodb://localhost:27017")
-# db = client["acciones"]
 db = get_db()
 
 @app.get("/")
@@ -172,10 +170,21 @@ def save_user_decision(ticker: str, decision: str):
 from pydantic import BaseModel
 import hashlib
 
+from typing import Optional
+
 # --- MODELO DE USUARIO ---
 class User(BaseModel):
     email: str
     password: str
+    name: Optional[str] = None
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+
+class PasswordChange(BaseModel):
+    email: str
+    old_password: str
+    new_password: str
 
 # --- UTILS CRYPTO ---
 def hash_password(password: str) -> str:
@@ -193,7 +202,8 @@ def register(user: User):
     # Hashear password y guardar
     new_user = {
         "email": user.email,
-        "password": hash_password(user.password)
+        "password": hash_password(user.password),
+        "name": user.name or ""
     }
     db_conn.users.insert_one(new_user)
     return {"status": "success", "message": "Usuario registrado exitosamente"}
@@ -207,9 +217,57 @@ def login(user: User):
         return {"status": "error", "message": "Credenciales inválidas"}
     
     if existing_user["password"] == hash_password(user.password):
-        return {"status": "success", "message": "Login exitoso", "email": user.email}
+        # Devolver también el nombre si existe
+        return {
+            "status": "success", 
+            "message": "Login exitoso", 
+            "email": user.email,
+            "name": existing_user.get("name", "")
+        }
     else:
         return {"status": "error", "message": "Credenciales inválidas"}
+
+@app.put("/user/{email}")
+def update_user(email: str, user_update: UserUpdate):
+    db_conn = get_db()
+    
+    # Preparamos los campos a actualizar
+    update_data = {}
+    if user_update.name is not None:
+        update_data["name"] = user_update.name
+        
+    if not update_data:
+        return {"status": "info", "message": "No hay datos para actualizar"}
+
+    result = db_conn.users.update_one(
+        {"email": email},
+        {"$set": update_data}
+    )
+    
+    if result.matched_count == 0:
+        return {"status": "error", "message": "Usuario no encontrado"}
+        
+    return {"status": "success", "message": "Perfil actualizado correctamente"}
+
+@app.post("/user/change_password")
+def change_password(req: PasswordChange):
+    db_conn = get_db()
+    
+    user = db_conn.users.find_one({"email": req.email})
+    if not user:
+        return {"status": "error", "message": "Usuario no encontrado"}
+        
+    # Verificar contraseña anterior
+    if user["password"] != hash_password(req.old_password):
+        return {"status": "error", "message": "La contraseña actual es incorrecta"}
+        
+    # Actualizar con la nueva
+    db_conn.users.update_one(
+        {"email": req.email},
+        {"$set": {"password": hash_password(req.new_password)}}
+    )
+    
+    return {"status": "success", "message": "Contraseña actualizada exitosamente"}
 
 
 class DecisionRequest(BaseModel):

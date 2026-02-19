@@ -52,6 +52,9 @@ class _LoginScreenState extends State<LoginScreen> {
             // Guardar sesión
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('user_email', email);
+            if (data['name'] != null) {
+              await prefs.setString('user_name', data['name']);
+            }
 
              Navigator.pushReplacement(
               context,

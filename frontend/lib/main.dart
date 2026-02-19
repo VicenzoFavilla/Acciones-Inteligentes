@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Market AI Solver',
+      title: 'Acciones Inteligentes',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: Colors.blueAccent,
@@ -48,6 +48,7 @@ class _MainDashboardState extends State<MainDashboard> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _tickerController = TextEditingController();
   String? _userEmail;
+  String? _userName;
   
   List<dynamic> popularStocks = [];
   bool isLoadingPopular = true;
@@ -55,13 +56,16 @@ class _MainDashboardState extends State<MainDashboard> {
   @override
   void initState() {
     super.initState();
-    _loadUserEmail();
+    _loadUserData();
     _fetchPopularStocks();
   }
 
-  Future<void> _loadUserEmail() async {
+  Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() => _userEmail = prefs.getString('user_email'));
+    setState(() {
+      _userEmail = prefs.getString('user_email');
+      _userName = prefs.getString('user_name');
+    });
   }
 
   Future<void> _fetchPopularStocks() async {
@@ -128,7 +132,7 @@ class _MainDashboardState extends State<MainDashboard> {
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
         const SizedBox(width: 8),
-        Text("Market AI Solver", style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold)),
+        Text("Acciones Inteligentes", style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -253,7 +257,9 @@ class _MainDashboardState extends State<MainDashboard> {
                   children: [
                     const Icon(Icons.account_circle_outlined, size: 80, color: Colors.black87),
                     const SizedBox(height: 10),
-                    Text(_userEmail!, style: GoogleFonts.poppins(fontSize: 16, color: Colors.black87)),
+                    if (_userName != null && _userName!.isNotEmpty)
+                      Text(_userName!, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    Text(_userEmail!, style: GoogleFonts.poppins(fontSize: 14, color: Colors.black54)),
                   ],
                 )
               : const CircularProgressIndicator(),
@@ -362,7 +368,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(widget.ticker, style: GoogleFonts.poppins(fontSize: 35, fontWeight: FontWeight.bold)),
-              Text("\$$price", style: GoogleFonts.poppins(fontSize: 28, color: Colors.blueAccent)),
+              Text("\$${double.parse(price).toStringAsFixed(2)}", style: GoogleFonts.poppins(fontSize: 28, color: Colors.blueAccent)),
             ],
           ),
           const SizedBox(height: 20),
