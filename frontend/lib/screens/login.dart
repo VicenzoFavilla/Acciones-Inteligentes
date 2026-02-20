@@ -33,7 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final endpoint = _isLogin ? "login" : "register";
-      final url = Uri.parse('http://127.0.0.1:8000/$endpoint');
+      final url = Uri.parse('http://127.0.0.1:8001/$endpoint');
       
       final response = await http.post(
         url,
@@ -49,9 +49,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         if (data['status'] == 'success') {
           if (_isLogin) {
-            // Guardar sesión
+            // Guardar sesión y token JWT
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('user_email', email);
+            if (data['access_token'] != null) {
+              await prefs.setString('auth_token', data['access_token']);
+            }
             if (data['name'] != null) {
               await prefs.setString('user_name', data['name']);
             }

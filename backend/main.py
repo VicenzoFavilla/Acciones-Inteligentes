@@ -7,15 +7,19 @@ Permite consultar un ticker, ver datos básicos y usar modelos ML
 from services.stocks import get_stock_info, get_price_history
 from ml.recomendacion import smart_recommendation, basic_recommendation
 from ml.global_models import tickers_from_usage
+from services.wallet import get_wallet, update_balance, add_transaction, buy_stock, sell_stock
 
 from services.stocks import get_stock_info, get_price_history
 from config.db import get_db
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 import joblib
 import pandas as pd
 import warnings
+from auth_handler import get_password_hash, verify_password, create_access_token, decode_access_token
+from fastapi import FastAPI, Query, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
+from services.scheduler import start_scheduler
 
 # Silenciar ruidos de versión de scikit-learn
 try:
@@ -36,6 +40,37 @@ app.add_middleware(
 )
 
 db = get_db()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+@app.on_event("startup")
+async def startup_event():
+    # Inicia el programador de tareas para actualización de modelos
+    start_scheduler()
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido o expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    email: str = payload.get("sub")
+    if email is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    db_conn = get_db()
+    user = db_conn.users.find_one({"email": email})
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario no encontrado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 @app.get("/")
 def read_root():
@@ -115,8 +150,19 @@ def predict_stock(ticker: str):
 @app.get("/popular")
 def get_popular_stocks():
     top_tickers = tickers_from_usage(limit=5)
-    if not top_tickers:
-        top_tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+    default_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA"]
+    
+    # Combinamos para tener siempre al menos 5 pero priorizando los usados
+    seen = set()
+    combined = []
+    for t in top_tickers + default_list:
+        if t not in seen:
+            combined.append(t)
+            seen.add(t)
+        if len(combined) >= 5:
+            break
+    
+    top_tickers = combined
 
     lista_populares = []
     for ticker in top_tickers:
@@ -187,10 +233,13 @@ class PasswordChange(BaseModel):
     new_password: str
 
 # --- UTILS CRYPTO ---
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
-
 # --- RUTAS DE AUTH ---
+@app.get("/me")
+async def read_users_me(current_user: dict = Depends(get_current_user)):
+    # Eliminar password del retorno por seguridad
+    user_data = {k: v for k, v in current_user.items() if k != "password" and k != "_id"}
+    return user_data
+
 @app.post("/register")
 def register(user: User):
     db_conn = get_db()
@@ -199,10 +248,10 @@ def register(user: User):
     if db_conn.users.find_one({"email": user.email}):
         return {"status": "error", "message": "El usuario ya existe"}
     
-    # Hashear password y guardar
+    # Hashear password y guardar (Usando auth_handler con bcrypt)
     new_user = {
         "email": user.email,
-        "password": hash_password(user.password),
+        "password": get_password_hash(user.password),
         "name": user.name or ""
     }
     db_conn.users.insert_one(new_user)
@@ -216,19 +265,27 @@ def login(user: User):
     if not existing_user:
         return {"status": "error", "message": "Credenciales inválidas"}
     
-    if existing_user["password"] == hash_password(user.password):
-        # Devolver también el nombre si existe
-        return {
-            "status": "success", 
-            "message": "Login exitoso", 
-            "email": user.email,
-            "name": existing_user.get("name", "")
-        }
-    else:
-        return {"status": "error", "message": "Credenciales inválidas"}
+    # Verificar contraseña (Soporta bcrypt)
+    try:
+        if verify_password(user.password, existing_user["password"]):
+            access_token = create_access_token(data={"sub": user.email})
+            return {
+                "status": "success", 
+                "message": "Login exitoso", 
+                "access_token": access_token,
+                "token_type": "bearer",
+                "email": user.email,
+                "name": existing_user.get("name", "")
+            }
+    except Exception:
+        # Fallback para contraseñas antiguas con hashlib si es necesario (Opcional)
+        # return {"status": "error", "message": "Por favor, restablezca su contraseña por motivos de seguridad."}
+        pass
 
-@app.put("/user/{email}")
-def update_user(email: str, user_update: UserUpdate):
+    return {"status": "error", "message": "Credenciales inválidas"}
+
+@app.put("/user/update")
+def update_user(user_update: UserUpdate, current_user: dict = Depends(get_current_user)):
     db_conn = get_db()
     
     # Preparamos los campos a actualizar
@@ -240,34 +297,95 @@ def update_user(email: str, user_update: UserUpdate):
         return {"status": "info", "message": "No hay datos para actualizar"}
 
     result = db_conn.users.update_one(
-        {"email": email},
+        {"email": current_user["email"]},
         {"$set": update_data}
     )
     
-    if result.matched_count == 0:
-        return {"status": "error", "message": "Usuario no encontrado"}
-        
     return {"status": "success", "message": "Perfil actualizado correctamente"}
 
 @app.post("/user/change_password")
-def change_password(req: PasswordChange):
+def change_password(req: PasswordChange, current_user: dict = Depends(get_current_user)):
     db_conn = get_db()
     
-    user = db_conn.users.find_one({"email": req.email})
-    if not user:
-        return {"status": "error", "message": "Usuario no encontrado"}
-        
-    # Verificar contraseña anterior
-    if user["password"] != hash_password(req.old_password):
+    # Verificar contraseña anterior (Usando bcrypt)
+    if not verify_password(req.old_password, current_user["password"]):
         return {"status": "error", "message": "La contraseña actual es incorrecta"}
         
-    # Actualizar con la nueva
+    # Actualizar con la nueva (Usando bcrypt)
     db_conn.users.update_one(
-        {"email": req.email},
-        {"$set": {"password": hash_password(req.new_password)}}
+        {"email": current_user["email"]},
+        {"$set": {"password": get_password_hash(req.new_password)}}
     )
     
     return {"status": "success", "message": "Contraseña actualizada exitosamente"}
+
+# --- RUTAS DE BILLETERA ---
+@app.get("/wallet/info")
+def wallet_info(current_user: dict = Depends(get_current_user)):
+    wallet = get_wallet(current_user["email"])
+    # Limpiar ID de Mongo para el retorno
+    if "_id" in wallet:
+        del wallet["_id"]
+    return {"status": "success", "wallet": wallet}
+
+@app.post("/wallet/deposit")
+def deposit_funds(amount: float, current_user: dict = Depends(get_current_user)):
+    if amount <= 0:
+        return {"status": "error", "message": "El monto debe ser positivo"}
+    
+    success = update_balance(current_user["email"], amount)
+    if success:
+        return {"status": "success", "message": f"Se han depositado ${amount} correctamente."}
+    return {"status": "error", "message": "No se pudo actualizar el saldo."}
+
+@app.get("/wallet/portfolio")
+def portfolio_info(current_user: dict = Depends(get_current_user)):
+    wallet = get_wallet(current_user["email"])
+    return {"status": "success", "portfolio": wallet.get("portfolio", {})}
+
+# --- RUTAS DE TRADING ---
+@app.post("/trade/buy")
+def trade_buy(ticker: str, quantity: int, current_user: dict = Depends(get_current_user)):
+    if quantity <= 0:
+        return {"status": "error", "message": "La cantidad debe ser mayor a 0"}
+    
+    ticker_up = ticker.upper()
+    info = get_stock_info(ticker_up)
+    if not info or not info.get("price"):
+        return {"status": "error", "message": f"No se pudo obtener el precio para {ticker_up}"}
+    
+    price = info["price"]
+    success, message = buy_stock(current_user["email"], ticker_up, quantity, price)
+    
+    if success:
+        return {"status": "success", "message": message, "price_paid": price}
+    return {"status": "error", "message": message}
+
+@app.post("/trade/sell")
+def trade_sell(ticker: str, quantity: int, current_user: dict = Depends(get_current_user)):
+    if quantity <= 0:
+        return {"status": "error", "message": "La cantidad debe ser mayor a 0"}
+    
+    ticker_up = ticker.upper()
+    info = get_stock_info(ticker_up)
+    if not info or not info.get("price"):
+        return {"status": "error", "message": f"No se pudo obtener el precio para {ticker_up}"}
+    
+    price = info["price"]
+    success, message = sell_stock(current_user["email"], ticker_up, quantity, price)
+    
+    if success:
+        return {"status": "success", "message": message, "price_sold": price}
+    return {"status": "error", "message": message}
+
+@app.get("/wallet/history")
+def transaction_history(current_user: dict = Depends(get_current_user)):
+    db = get_db()
+    transactions = list(db.transactions.find({"email": current_user["email"]}).sort("timestamp", -1))
+    for t in transactions:
+        if "_id" in t:
+            t["_id"] = str(t["_id"])
+    return {"status": "success", "transactions": transactions}
 
 
 class DecisionRequest(BaseModel):

@@ -32,7 +32,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      final response = await http.get(Uri.parse('http://127.0.0.1:8000/user/$email'));
+      final response = await http.get(Uri.parse('http://127.0.0.1:8001/user/$email'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
@@ -49,12 +49,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _updateProfile(String newName) async {
-    if (_email == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
     
     try {
       final response = await http.put(
-        Uri.parse('http://127.0.0.1:8000/user/$_email'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse('http://127.0.0.1:8001/user/update'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
         body: json.encode({'name': newName}),
       );
 
@@ -73,12 +77,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _changePassword(String oldPass, String newPass) async {
-    if (_email == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
 
     try {
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8000/user/change_password'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse('http://127.0.0.1:8001/user/change_password'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
         body: json.encode({
           'email': _email,
           'old_password': oldPass,

@@ -3,7 +3,7 @@ services:
     image: mongo:latest
     container_name: mongo_db
     ports:
-      - "8000:8000"
+      - "27017:27017"
     networks:
       - bolsa_net
 
@@ -14,7 +14,7 @@ services:
       - "8001:8001"
     environment:
       # Asegúrate de que en tu código Python uses exactamente "MONGO_URL"
-      - MONGO_URL=mongodb://mongo_db:27017/acciones_db
+      - MONGO_URL=mongodb://mongodb:27017/acciones_ml
     depends_on:
       - mongodb
     networks:

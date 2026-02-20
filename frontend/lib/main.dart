@@ -11,6 +11,8 @@ import 'screens/settings_screen.dart';
 import 'screens/premium_screen.dart';
 import 'screens/faq_screen.dart';
 import 'screens/login.dart';
+import 'screens/wallet_screen.dart';
+import 'screens/history_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,7 +72,7 @@ class _MainDashboardState extends State<MainDashboard> {
 
   Future<void> _fetchPopularStocks() async {
     try {
-      final response = await http.get(Uri.parse('http://127.0.0.1:8000/popular'));
+      final response = await http.get(Uri.parse('http://127.0.0.1:8001/popular'));
       if (response.statusCode == 200) {
         if (mounted) {
           setState(() {
@@ -265,9 +267,18 @@ class _MainDashboardState extends State<MainDashboard> {
               : const CircularProgressIndicator(),
             const SizedBox(height: 40),
             ListTile(
-              leading: const Icon(Icons.settings_outlined, color: Colors.black87),
               title: const Text('Configuración'),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.account_balance_wallet_outlined, color: Colors.black87),
+              title: const Text('Mi Billetera'),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const WalletScreen())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history, color: Colors.black87),
+              title: const Text('Historial'),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const HistoryScreen())),
             ),
             const Spacer(),
             ListTile(
@@ -303,7 +314,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
 
   Future<void> _fetchData() async {
     try {
-      final response = await http.get(Uri.parse('http://127.0.0.1:8000/predict/${widget.ticker}'));
+      final response = await http.get(Uri.parse('http://127.0.0.1:8001/predict/${widget.ticker}'));
       if (response.statusCode == 200 && mounted) {
         setState(() {
           data = json.decode(response.body);
@@ -443,10 +454,89 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   Widget _buildDecisionButtons() {
     return Row(
       children: [
-        Expanded(child: OutlinedButton(onPressed: () {}, child: const Text("No comprar"))),
+        Expanded(child: OutlinedButton(onPressed: () => _handleDecision("no compré"), child: const Text("No comprar"))),
         const SizedBox(width: 15),
-        Expanded(child: ElevatedButton(onPressed: () {}, child: const Text("Comprar"))),
+        Expanded(child: ElevatedButton(onPressed: _showBuyDialog, child: const Text("Comprar"))),
       ],
     );
+  }
+
+  Future<void> _handleDecision(String decision) async {
+    try {
+      await http.post(
+        Uri.parse('http://127.0.0.1:8001/decision'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'ticker': widget.ticker, 'decision': decision}),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Decisión registrada: $decision')));
+      }
+    } catch (e) {
+      debugPrint("Error saving decision: $e");
+    }
+  }
+
+  void _showBuyDialog() {
+    final TextEditingController qtyController = TextEditingController(text: "1");
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Comprar ${widget.ticker}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Precio actual: \$${(data!['precio'] ?? 0.0).toStringAsFixed(2)}"),
+            const SizedBox(height: 15),
+            TextField(
+              controller: qtyController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: "Cantidad de acciones"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              final int? qty = int.tryParse(qtyController.text);
+              if (qty != null && qty > 0) {
+                _executeTrade(qty);
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Comprar ahora'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeTrade(int quantity) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    
+    if (token == null) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8001/trade/buy?ticker=${widget.ticker}&quantity=$quantity'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      final resData = json.decode(response.body);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(resData['message']),
+            backgroundColor: resData['status'] == 'success' ? Colors.green : Colors.red,
+          ),
+        );
+        if (resData['status'] == 'success') {
+          _handleDecision("compré");
+        }
+      }
+    } catch (e) {
+      debugPrint("Error executing trade: $e");
+    }
   }
 }
