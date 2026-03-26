@@ -54,12 +54,16 @@ class _MainDashboardState extends State<MainDashboard> {
   
   List<dynamic> popularStocks = [];
   bool isLoadingPopular = true;
+  
+  List<dynamic> marketList = [];
+  bool isLoadingMarket = true;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _fetchPopularStocks();
+    _fetchMarketData();
   }
 
   Future<void> _loadUserData() async {
@@ -87,6 +91,31 @@ class _MainDashboardState extends State<MainDashboard> {
     }
   }
 
+  Future<void> _fetchMarketData() async {
+    try {
+      final response = await http.get(Uri.parse('http://127.0.0.1:8001/market'));
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            marketList = json.decode(response.body);
+            isLoadingMarket = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error al conectar con la API de mercado: $e");
+      if (mounted) setState(() => isLoadingMarket = false);
+    }
+  }
+
+  String _formatNumber(num? number) {
+    if (number == null) return "0";
+    if (number >= 1e12) return "\$${(number / 1e12).toStringAsFixed(2)}T";
+    if (number >= 1e9) return "\$${(number / 1e9).toStringAsFixed(2)}B";
+    if (number >= 1e6) return "\$${(number / 1e6).toStringAsFixed(2)}M";
+    return "\$${number.toStringAsFixed(2)}";
+  }
+
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_email');
@@ -102,24 +131,30 @@ class _MainDashboardState extends State<MainDashboard> {
       backgroundColor: const Color(0xFFF5F7FA),
       drawer: _buildDrawer(),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 25.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 30),
-              _buildHeader(),
-              const SizedBox(height: 10),
-              Text("¿Qué acción analizamos hoy?", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 16)),
-              const SizedBox(height: 25),
-              _buildSearchBar(),
-              const SizedBox(height: 35),
-              Text("Recomendaciones Populares", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 15),
-              _buildPopularList(),
-              const Spacer(),
-              _buildFooter(),
-            ],
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 25.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 30),
+                _buildHeader(),
+                const SizedBox(height: 10),
+                Text("¿Qué acción analizamos hoy?", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 16)),
+                const SizedBox(height: 25),
+                _buildSearchBar(),
+                const SizedBox(height: 35),
+                Text("Recomendaciones Populares", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                _buildPopularList(),
+                const SizedBox(height: 35),
+                Text("Mercado de Acciones", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                _buildMarketTable(),
+                const SizedBox(height: 30),
+                _buildFooter(),
+              ],
+            ),
           ),
         ),
       ),
@@ -147,6 +182,137 @@ class _MainDashboardState extends State<MainDashboard> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: popularStocks.map((stock) => _buildPopularCard(Map<String, dynamic>.from(stock))).toList(),
+      ),
+    );
+  }
+
+  Widget _buildMarketTable() {
+    if (isLoadingMarket) return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
+    if (marketList.isEmpty) return const Text("No hay datos disponibles");
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 8))],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          // Header
+          Row(
+            children: [
+              Expanded(flex: 3, child: Text("Nombre", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
+              Expanded(flex: 2, child: Text("Precio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
+              Expanded(flex: 2, child: Text("24h Cambio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Volumen", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Cap. mercado", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 1, child: Text("Acciones", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.center)),
+            ],
+          ),
+          const SizedBox(height: 15),
+          Divider(color: Colors.grey[200], height: 1),
+          const SizedBox(height: 10),
+          // Filas
+          ...marketList.map((market) => _buildMarketRow(Map<String, dynamic>.from(market))).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMarketRow(Map<String, dynamic> market) {
+    final String ticker = market['ticker']?.toString() ?? 'N/A';
+    final String name = market['nombre']?.toString() ?? ticker;
+    final double price = (market['precio'] as num?)?.toDouble() ?? 0.0;
+    final double change = (market['variacion'] as num?)?.toDouble() ?? 0.0;
+    final bool isUp = change >= 0;
+    final Color trendColor = isUp ? const Color(0xFF00C853) : const Color(0xFFFF3D00); // Verde y rojo brillantes
+    final num volume = market['volumen'] ?? 0;
+    final num marketCap = market['market_cap'] ?? 0;
+
+    return GestureDetector(
+      onTap: () => _navigateToDetail(ticker),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0),
+      child: Row(
+        children: [
+          // Nombre y Ticker
+          Expanded(
+            flex: 3,
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Colors.primaries[ticker.hashCode % Colors.primaries.length],
+                  child: Text(ticker[0], style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Text(ticker, style: GoogleFonts.poppins(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(width: 5),
+                      Expanded(child: Text(name, style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 11), overflow: TextOverflow.ellipsis)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Precio
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("\$${price.toStringAsFixed(price < 1 ? 4 : 2)}", style: GoogleFonts.poppins(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13)),
+              ],
+            ),
+          ),
+          // Cambio
+          Expanded(
+            flex: 2,
+            child: Container(
+              alignment: Alignment.centerRight,
+              child: Text(
+                "${isUp ? '+' : ''}${change.toStringAsFixed(2)}%", 
+                style: GoogleFonts.poppins(color: trendColor, fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
+          // Volumen
+          Expanded(
+            flex: 2,
+            child: Text(_formatNumber(volume), style: GoogleFonts.poppins(color: Colors.black87, fontSize: 13), textAlign: TextAlign.right),
+          ),
+          // Cap. Mercado
+          Expanded(
+            flex: 2,
+            child: Text(_formatNumber(marketCap), style: GoogleFonts.poppins(color: Colors.black87, fontSize: 13), textAlign: TextAlign.right),
+          ),
+          // Acciones
+          Expanded(
+            flex: 1,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: () => _navigateToDetail(ticker),
+                  child: const Icon(Icons.analytics_outlined, color: Colors.black54, size: 18),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () {
+                    // Acción de compra/venta placeholder
+                  },
+                  child: const Icon(Icons.compare_arrows_outlined, color: Colors.black54, size: 18),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       ),
     );
   }

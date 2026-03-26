@@ -202,6 +202,74 @@ def get_popular_stocks():
     return lista_populares
 
     
+@app.get("/crypto")
+def get_crypto_list():
+    import yfinance as yf
+    top_cryptos = ["BTC-USD", "ETH-USD", "USDT-USD", "BNB-USD", "SOL-USD", "XRP-USD", "USDC-USD", "TRX-USD", "DOGE-USD", "ADA-USD"]
+    
+    lista_crypto = []
+    
+    name_map = {
+        "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "USDT-USD": "TetherUS",
+        "BNB-USD": "BNB", "SOL-USD": "Solana", "XRP-USD": "XRP",
+        "USDC-USD": "USDC", "TRX-USD": "TRON", "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano"
+    }
+
+    for ticker in top_cryptos:
+        info = get_stock_info(ticker)
+        if info:
+            market_cap = 0
+            try:
+                stock_yf = yf.Ticker(ticker)
+                inf = stock_yf.info
+                if inf and "marketCap" in inf:
+                    market_cap = inf["marketCap"]
+            except Exception:
+                pass
+                
+            lista_crypto.append({
+                "ticker": ticker.replace("-USD", ""),
+                "nombre": name_map.get(ticker, info.get("name", ticker.replace("-USD", ""))),
+                "precio": info.get("price"),
+                "variacion": info.get("change"),
+                "color_green": (info.get("change") or 0) >= 0,
+                "volumen": info.get("volume"),
+                "market_cap": market_cap
+            })
+            
+    return lista_crypto
+
+@app.get("/market")
+def get_market_list():
+    import yfinance as yf
+    top_stocks = ["TSLA", "AMZN", "MSFT", "GOOGL", "META", "NFLX", "NVDA", "AMD", "INTC", "BABA"]
+    
+    lista_market = []
+    
+    for ticker in top_stocks:
+        info = get_stock_info(ticker)
+        if info:
+            market_cap = 0
+            try:
+                stock_yf = yf.Ticker(ticker)
+                inf = stock_yf.info
+                if inf and "marketCap" in inf:
+                    market_cap = inf["marketCap"]
+            except Exception:
+                pass
+                
+            lista_market.append({
+                "ticker": ticker,
+                "nombre": info.get("name", ticker),
+                "precio": info.get("price"),
+                "variacion": info.get("change"),
+                "color_green": (info.get("change") or 0) >= 0,
+                "volumen": info.get("volume"),
+                "market_cap": market_cap
+            })
+            
+    return lista_market
+
 @app.get("/feedback")
 def save_user_decision(ticker: str, decision: str):
     db = get_db()
