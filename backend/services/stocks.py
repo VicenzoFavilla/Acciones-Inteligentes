@@ -86,10 +86,12 @@ def get_stock_info(ticker: str):
     }
 
 
-def get_price_history(ticker: str, period: str = "30d"):
-    """Devuelve la serie de cierres diarios para graficar desde la CLI."""
+def get_price_history(ticker: str, period: str = "30d", full=False):
+    """Devuelve la serie de cierres diarios u OHLC completo."""
     stock = yf.Ticker(ticker)
     hist = stock.history(period=period, interval="1d")
     if hist is None or hist.empty:
         return None
+    if full:
+        return hist
     return hist["Close"]

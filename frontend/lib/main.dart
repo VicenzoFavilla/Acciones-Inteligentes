@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:candlesticks/candlesticks.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 // Pantallas externas (Asegúrate de que los archivos existan)
 import 'screens/profile_screen.dart';
@@ -57,6 +59,11 @@ class _MainDashboardState extends State<MainDashboard> {
   
   List<dynamic> marketList = [];
   bool isLoadingMarket = true;
+  
+  List<dynamic> watchlist = [];
+  bool isLoadingWatchlist = true;
+  
+  WebSocketChannel? _channel;
 
   @override
   void initState() {
@@ -64,6 +71,56 @@ class _MainDashboardState extends State<MainDashboard> {
     _loadUserData();
     _fetchPopularStocks();
     _fetchMarketData();
+    _fetchWatchlist();
+    _connectWebSocket();
+  }
+  
+  void _connectWebSocket() {
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse('ws://127.0.0.1:8001/ws/market'));
+      _channel!.stream.listen((message) {
+        final decoded = json.decode(message);
+        if (decoded['type'] == 'market_tick') {
+          final List updates = decoded['data'];
+          if (mounted) {
+            setState(() {
+              for (var update in updates) {
+                for (var stock in popularStocks) {
+                  if (stock['ticker'] == update['ticker']) {
+                    stock['precio'] = update['precio'];
+                    stock['variacion'] = update['variacion'];
+                    stock['color_green'] = update['color_green'];
+                  }
+                }
+                for (var stock in marketList) {
+                  if (stock['ticker'] == update['ticker']) {
+                    stock['precio'] = update['precio'];
+                    stock['variacion'] = update['variacion'];
+                    stock['color_green'] = update['color_green'];
+                  }
+                }
+                for (var stock in watchlist) {
+                  if (stock['ticker'] == update['ticker']) {
+                    stock['precio'] = update['precio'];
+                    stock['variacion'] = update['variacion'];
+                    stock['color_green'] = update['color_green'];
+                  }
+                }
+              }
+            });
+          }
+        }
+      }, onError: (e) => debugPrint("WS Error: $e"));
+    } catch (e) {
+      debugPrint("WS Connect Error: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _channel?.sink.close();
+    _tickerController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserData() async {
@@ -108,6 +165,71 @@ class _MainDashboardState extends State<MainDashboard> {
     }
   }
 
+  Future<void> _fetchWatchlist() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      if (mounted) setState(() => isLoadingWatchlist = false);
+      return;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:8001/user/watchlist'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            watchlist = json.decode(response.body)['watchlist'] ?? [];
+            isLoadingWatchlist = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => isLoadingWatchlist = false);
+      }
+    } catch (e) {
+      if (mounted) setState(() => isLoadingWatchlist = false);
+    }
+  }
+
+  Future<void> _toggleWatchlist(String ticker) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión')));
+      return;
+    }
+
+    final isFav = watchlist.any((stock) => stock['ticker'] == ticker);
+
+    try {
+      // Optimistic update
+      setState(() {
+        if (isFav) {
+          watchlist.removeWhere((stock) => stock['ticker'] == ticker);
+        } else {
+          watchlist.add({'ticker': ticker, 'nombre': ticker});
+        }
+      });
+      
+      if (isFav) {
+        await http.delete(
+          Uri.parse('http://127.0.0.1:8001/user/watchlist/$ticker'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      } else {
+        await http.post(
+          Uri.parse('http://127.0.0.1:8001/user/watchlist/$ticker'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      }
+      _fetchWatchlist();
+    } catch (e) {
+      _fetchWatchlist(); // Revert on error
+    }
+  }
+
   String _formatNumber(num? number) {
     if (number == null) return "0";
     if (number >= 1e12) return "\$${(number / 1e12).toStringAsFixed(2)}T";
@@ -148,6 +270,10 @@ class _MainDashboardState extends State<MainDashboard> {
                 const SizedBox(height: 15),
                 _buildPopularList(),
                 const SizedBox(height: 35),
+                Text("Mis Favoritos", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                _buildWatchlistTable(),
+                const SizedBox(height: 35),
                 Text("Mercado de Acciones", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 15),
                 _buildMarketTable(),
@@ -182,6 +308,38 @@ class _MainDashboardState extends State<MainDashboard> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: popularStocks.map((stock) => _buildPopularCard(Map<String, dynamic>.from(stock))).toList(),
+      ),
+    );
+  }
+
+  Widget _buildWatchlistTable() {
+    if (isLoadingWatchlist) return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
+    if (watchlist.isEmpty) return Padding(padding: const EdgeInsets.only(left: 5), child: Text("Aún no tienes favoritos. Toca la estrella para agregar uno.", style: GoogleFonts.poppins(color: Colors.grey[600])));
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 8))],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(flex: 3, child: Text("Nombre", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
+              Expanded(flex: 2, child: Text("Precio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
+              Expanded(flex: 2, child: Text("24h Cambio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Volumen", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Cap. mercado", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 1, child: Text("Acciones", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.center)),
+            ],
+          ),
+          const SizedBox(height: 15),
+          Divider(color: Colors.grey[200], height: 1),
+          const SizedBox(height: 10),
+          ...watchlist.map((market) => _buildMarketRow(Map<String, dynamic>.from(market))).toList(),
+        ],
       ),
     );
   }
@@ -303,10 +461,12 @@ class _MainDashboardState extends State<MainDashboard> {
                 ),
                 const SizedBox(width: 8),
                 GestureDetector(
-                  onTap: () {
-                    // Acción de compra/venta placeholder
-                  },
-                  child: const Icon(Icons.compare_arrows_outlined, color: Colors.black54, size: 18),
+                  onTap: () => _toggleWatchlist(ticker),
+                  child: Icon(
+                    watchlist.any((s) => s['ticker'] == ticker) ? Icons.star : Icons.star_border, 
+                    color: watchlist.any((s) => s['ticker'] == ticker) ? Colors.amber : Colors.black54, 
+                    size: 18
+                  ),
                 ),
               ],
             ),
@@ -530,11 +690,18 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
 
   Widget _buildHeaderCard() {
     final String price = (data!['precio'] ?? data!['price'] ?? '0.00').toString();
-    final List historyRaw = data!['history'] is List ? data!['history'] : [];
-    final List<FlSpot> spots = historyRaw.asMap().entries.map((e) {
-      final double val = (e.value as num?)?.toDouble() ?? 0.0;
-      return FlSpot(e.key.toDouble(), val);
-    }).toList();
+    
+    final List ohlcRaw = data!['ohlc'] is List ? data!['ohlc'] : [];
+    final List<Candle> candles = ohlcRaw.map((e) {
+      return Candle(
+        date: DateTime.parse(e['date']),
+        high: (e['high'] as num).toDouble(),
+        low: (e['low'] as num).toDouble(),
+        open: (e['open'] as num).toDouble(),
+        close: (e['close'] as num).toDouble(),
+        volume: (e['volume'] as num).toDouble()
+      );
+    }).toList().reversed.toList(); // Candlesticks lib necesita el más reciente primero
 
     return Container(
       padding: const EdgeInsets.all(25),
@@ -550,22 +717,12 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
           ),
           const SizedBox(height: 20),
           SizedBox(
-            height: 180,
-            child: spots.length >= 2
-              ? LineChart(
-                  LineChartData(
-                    gridData: const FlGridData(show: false),
-                    titlesData: const FlTitlesData(show: false),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: spots,
-                        isCurved: true,
-                        color: Colors.blueAccent,
-                        barWidth: 4,
-                        belowBarData: BarAreaData(show: true, color: Colors.blueAccent.withOpacity(0.1)),
-                      ),
-                    ],
+            height: 350,
+            child: candles.isNotEmpty
+              ? Theme(
+                  data: ThemeData.light(),
+                  child: Candlesticks(
+                    candles: candles,
                   ),
                 )
               : const Center(child: Icon(Icons.show_chart, size: 50, color: Colors.grey)),

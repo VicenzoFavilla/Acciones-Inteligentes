@@ -100,6 +100,57 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
+  Future<void> _sellStock(String ticker, int quantity) async {
+    try {
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8001/trade/sell?ticker=$ticker&quantity=$quantity'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        _fetchWalletData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Venta de $quantity acciones de $ticker exitosa')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error al vender acciones')),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error selling: $e");
+    }
+  }
+
+  void _showSellDialog(String ticker, int maxQuantity) {
+    final TextEditingController quantityController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Vender $ticker'),
+        content: TextField(
+          controller: quantityController,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(hintText: "Cantidad (Máx: $maxQuantity)"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () {
+              final int? quantity = int.tryParse(quantityController.text);
+              if (quantity != null && quantity > 0 && quantity <= maxQuantity) {
+                _sellStock(ticker, quantity);
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Vender'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -203,7 +254,16 @@ class _WalletScreenState extends State<WalletScreen> {
                   ),
                 ],
               ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
+              ElevatedButton(
+                onPressed: () => _showSellDialog(ticker, quantity),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent.withOpacity(0.1),
+                  foregroundColor: Colors.redAccent,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text("Vender"),
+              ),
             ],
           ),
         );

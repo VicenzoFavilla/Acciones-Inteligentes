@@ -16,8 +16,10 @@ import joblib
 import pandas as pd
 import warnings
 from auth_handler import get_password_hash, verify_password, create_access_token, decode_access_token
-from fastapi import FastAPI, Query, Depends, HTTPException, status
+from fastapi import FastAPI, Query, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+import random
 from fastapi.security import OAuth2PasswordBearer
 from services.scheduler import start_scheduler
 
@@ -42,10 +44,78 @@ app.add_middleware(
 db = get_db()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+market_prices = {}
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
+async def init_market_prices():
+    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AMD", "INTC", "BABA", "BTC", "ETH"]
+    for t in tickers:
+        info = get_stock_info(t)
+        if info and info.get("price"):
+            market_prices[t] = {
+                "price": info.get("price"),
+                "change": info.get("change") or 0.0
+            }
+
+async def send_market_updates():
+    while True:
+        await asyncio.sleep(2)
+        if manager.active_connections and market_prices:
+            to_update = random.sample(list(market_prices.keys()), k=min(4, len(market_prices)))
+            updates = []
+            for t in to_update:
+                base = market_prices[t]
+                volatility = base["price"] * random.uniform(-0.002, 0.002)
+                new_price = round(base["price"] + volatility, 4)
+                new_change = round(base["change"] + random.uniform(-0.05, 0.05), 2)
+                
+                market_prices[t]["price"] = new_price
+                market_prices[t]["change"] = new_change
+                
+                updates.append({
+                    "ticker": t,
+                    "precio": new_price,
+                    "variacion": new_change,
+                    "color_green": new_change >= 0
+                })
+            await manager.broadcast({"type": "market_tick", "data": updates})
+
+@app.websocket("/ws/market")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 @app.on_event("startup")
 async def startup_event():
     # Inicia el programador de tareas para actualización de modelos
     start_scheduler()
+    # Inicializa simulación de mercado
+    await init_market_prices()
+    asyncio.create_task(send_market_updates())
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     payload = decode_access_token(token)
@@ -113,28 +183,36 @@ def predict_stock(ticker: str):
             ml_res = "Analizando..." # Valor por defecto si falla el .pkl
 
         info = get_stock_info(ticker_up)
-        history_df = get_price_history(ticker_up, period="30d")
+        history_df = get_price_history(ticker_up, period="30d", full=True)
         
-        # Procesamiento del historial (Asegurando que no sea nulo)
+        # Procesamiento del historial OHLC
         history_list = []
+        ohlc_list = []
         if history_df is not None and not history_df.empty:
-            # Caso 1: Es un DataFrame (tiene .columns)
             if hasattr(history_df, "columns"):
                 if isinstance(history_df.columns, pd.MultiIndex):
                     history_df.columns = history_df.columns.get_level_values(0)
                 
-                col = "Close" if "Close" in history_df.columns else "close"
-                if col in history_df.columns:
-                    history_list = [float(x) for x in history_df[col].dropna().tolist()]
-            # Caso 2: Es una Series (acceso directo)
-            else:
-                history_list = [float(x) for x in history_df.dropna().tolist()]
+                # Extraer OHLC list para candlesticks y history_list para líneas por si acaso
+                for index, row in history_df.iterrows():
+                    try:
+                        o = float(row.get("Open", row.get("open", 0)))
+                        h = float(row.get("High", row.get("high", 0)))
+                        l = float(row.get("Low", row.get("low", 0)))
+                        c = float(row.get("Close", row.get("close", 0)))
+                        v = float(row.get("Volume", row.get("volume", 0)))
+                        d = index.strftime("%Y-%m-%d") if hasattr(index, "strftime") else str(index)
+                        ohlc_list.append({"open": o, "high": h, "low": l, "close": c, "volume": v, "date": d})
+                        history_list.append(c)
+                    except Exception:
+                        pass
 
         return {
             "ticker": ticker_up,
             "precio": info.get("price") if info else 0.0,
             "recomendacion": ml_res,
-            "history": history_list
+            "history": history_list,
+            "ohlc": ohlc_list
         }
     except Exception as e:
         print(f"Error general en predict: {e}")
@@ -386,6 +464,57 @@ def change_password(req: PasswordChange, current_user: dict = Depends(get_curren
     )
     
     return {"status": "success", "message": "Contraseña actualizada exitosamente"}
+
+@app.post("/user/watchlist/{ticker}")
+def add_to_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    ticker_up = ticker.upper()
+    db_conn.users.update_one(
+        {"email": current_user["email"]},
+        {"$addToSet": {"watchlist": ticker_up}}
+    )
+    return {"status": "success", "message": f"{ticker_up} agregado a favoritos"}
+
+@app.delete("/user/watchlist/{ticker}")
+def remove_from_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    ticker_up = ticker.upper()
+    db_conn.users.update_one(
+        {"email": current_user["email"]},
+        {"$pull": {"watchlist": ticker_up}}
+    )
+    return {"status": "success", "message": f"{ticker_up} eliminado de favoritos"}
+
+@app.get("/user/watchlist")
+def get_watchlist(current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    user = db_conn.users.find_one({"email": current_user["email"]})
+    watchlist = user.get("watchlist", [])
+    
+    lista_watchlist = []
+    for ticker in watchlist:
+        info = get_stock_info(ticker)
+        if info:
+            history_data = get_price_history(ticker, period="7d")
+            history_list = []
+            if history_data is not None and not history_data.empty:
+                if hasattr(history_data, "columns"):
+                    if isinstance(history_data.columns, pd.MultiIndex):
+                        history_data.columns = history_data.columns.get_level_values(0)
+                    if "Close" in history_data.columns:
+                        history_list = history_data["Close"].tolist()
+                else:
+                    history_list = history_data.tolist()
+            history_list = [x for x in history_list if str(x) != 'nan']
+            lista_watchlist.append({
+                "ticker": ticker,
+                "nombre": info.get("name", ticker),
+                "precio": info.get("price"),
+                "variacion": info.get("change"),
+                "color_green": (info.get("change") or 0) >= 0,
+                "history": history_list
+            })
+    return {"status": "success", "watchlist": lista_watchlist}
 
 # --- RUTAS DE BILLETERA ---
 @app.get("/wallet/info")
