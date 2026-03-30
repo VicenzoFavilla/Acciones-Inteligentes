@@ -9,7 +9,7 @@ def get_wallet(email: str):
         wallet = {
             "email": email,
             "balance": 10000.0,
-            "portfolio": {}, # {ticker: quantity}
+            "portfolio": {}, # {ticker: {"quantity": int, "average_price": float}}
             "last_update": datetime.utcnow()
         }
         db.wallets.insert_one(wallet)
@@ -46,17 +46,26 @@ def add_transaction(email: str, ticker: str, quantity: int, price: float, side: 
     wallet = get_wallet(email)
     portfolio = wallet.get("portfolio", {})
     
-    current_qty = portfolio.get(ticker, 0)
+    # Manejar estructura antigua o nueva
+    asset_info = portfolio.get(ticker, {"quantity": 0, "average_price": 0.0})
+    if isinstance(asset_info, int): # Migración simple para datos viejos
+        asset_info = {"quantity": asset_info, "average_price": price}
+
+    current_qty = asset_info["quantity"]
+    current_avg = asset_info["average_price"]
+
     if side == "buy":
         new_qty = current_qty + quantity
+        # Cálculo del precio promedio ponderado
+        new_avg = ((current_qty * current_avg) + (quantity * price)) / new_qty
+        portfolio[ticker] = {"quantity": new_qty, "average_price": new_avg}
     else:
         new_qty = current_qty - quantity
-        
-    if new_qty <= 0:
-        if ticker in portfolio:
-            del portfolio[ticker]
-    else:
-        portfolio[ticker] = new_qty
+        if new_qty <= 0:
+            if ticker in portfolio:
+                del portfolio[ticker]
+        else:
+            portfolio[ticker] = {"quantity": new_qty, "average_price": current_avg}
         
     db.wallets.update_one(
         {"email": email},
@@ -81,7 +90,11 @@ def sell_stock(email: str, ticker: str, quantity: int, price: float):
     wallet = get_wallet(email)
     portfolio = wallet.get("portfolio", {})
     
-    current_qty = portfolio.get(ticker, 0)
+    asset_info = portfolio.get(ticker, {"quantity": 0})
+    if isinstance(asset_info, int): # Migración simple
+        asset_info = {"quantity": asset_info}
+
+    current_qty = asset_info["quantity"]
     if current_qty < quantity:
         return False, f"No tienes suficientes acciones de {ticker} para vender (tienes {current_qty})."
     

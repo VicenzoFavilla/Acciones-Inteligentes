@@ -8,6 +8,7 @@ from services.stocks import get_stock_info, get_price_history
 from ml.recomendacion import smart_recommendation, basic_recommendation
 from ml.global_models import tickers_from_usage
 from services.wallet import get_wallet, update_balance, add_transaction, buy_stock, sell_stock
+from services.orders import create_order, check_and_execute_orders
 
 from services.stocks import get_stock_info, get_price_history
 from config.db import get_db
@@ -68,7 +69,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 async def init_market_prices():
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AMD", "INTC", "BABA", "BTC", "ETH"]
+    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AMD", "INTC", "BABA"]
     for t in tickers:
         info = get_stock_info(t)
         if info and info.get("price"):
@@ -98,6 +99,10 @@ async def send_market_updates():
                     "variacion": new_change,
                     "color_green": new_change >= 0
                 })
+            
+            # Verificar órdenes límite cada tick de mercado
+            check_and_execute_orders(market_prices)
+            
             await manager.broadcast({"type": "market_tick", "data": updates})
 
 @app.websocket("/ws/market")
@@ -280,43 +285,6 @@ def get_popular_stocks():
     return lista_populares
 
     
-@app.get("/crypto")
-def get_crypto_list():
-    import yfinance as yf
-    top_cryptos = ["BTC-USD", "ETH-USD", "USDT-USD", "BNB-USD", "SOL-USD", "XRP-USD", "USDC-USD", "TRX-USD", "DOGE-USD", "ADA-USD"]
-    
-    lista_crypto = []
-    
-    name_map = {
-        "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "USDT-USD": "TetherUS",
-        "BNB-USD": "BNB", "SOL-USD": "Solana", "XRP-USD": "XRP",
-        "USDC-USD": "USDC", "TRX-USD": "TRON", "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano"
-    }
-
-    for ticker in top_cryptos:
-        info = get_stock_info(ticker)
-        if info:
-            market_cap = 0
-            try:
-                stock_yf = yf.Ticker(ticker)
-                inf = stock_yf.info
-                if inf and "marketCap" in inf:
-                    market_cap = inf["marketCap"]
-            except Exception:
-                pass
-                
-            lista_crypto.append({
-                "ticker": ticker.replace("-USD", ""),
-                "nombre": name_map.get(ticker, info.get("name", ticker.replace("-USD", ""))),
-                "precio": info.get("price"),
-                "variacion": info.get("change"),
-                "color_green": (info.get("change") or 0) >= 0,
-                "volumen": info.get("volume"),
-                "market_cap": market_cap
-            })
-            
-    return lista_crypto
-
 @app.get("/market")
 def get_market_list():
     import yfinance as yf
@@ -378,7 +346,6 @@ class PasswordChange(BaseModel):
     old_password: str
     new_password: str
 
-# --- UTILS CRYPTO ---
 # --- RUTAS DE AUTH ---
 @app.get("/me")
 async def read_users_me(current_user: dict = Depends(get_current_user)):
@@ -520,6 +487,41 @@ def get_watchlist(current_user: dict = Depends(get_current_user)):
 @app.get("/wallet/info")
 def wallet_info(current_user: dict = Depends(get_current_user)):
     wallet = get_wallet(current_user["email"])
+    
+    # Calcular P&L para cada activo y el total
+    portfolio = wallet.get("portfolio", {})
+    total_market_value = 0.0
+    detailed_portfolio = []
+
+    for ticker, info in portfolio.items():
+        qty = info.get("quantity", 0)
+        avg_price = info.get("average_price", 0.0)
+        
+        # Obtener precio actual
+        current_data = get_stock_info(ticker)
+        current_price = current_data.get("price", avg_price) if current_data else avg_price
+        
+        # Cálculos de rendimiento
+        cost_basis = qty * avg_price
+        market_value = qty * current_price
+        pnl_abs = market_value - cost_basis
+        pnl_pct = (pnl_abs / cost_basis * 100) if cost_basis > 0 else 0.0
+        
+        total_market_value += market_value
+        
+        detailed_portfolio.append({
+            "ticker": ticker,
+            "quantity": qty,
+            "average_price": avg_price,
+            "current_price": current_price,
+            "pnl_abs": pnl_abs,
+            "pnl_pct": pnl_pct,
+            "market_value": market_value
+        })
+
+    wallet["portfolio_details"] = detailed_portfolio
+    wallet["total_equity"] = wallet["balance"] + total_market_value
+    
     # Limpiar ID de Mongo para el retorno
     if "_id" in wallet:
         del wallet["_id"]
@@ -574,6 +576,27 @@ def trade_sell(ticker: str, quantity: int, current_user: dict = Depends(get_curr
     if success:
         return {"status": "success", "message": message, "price_sold": price}
     return {"status": "error", "message": message}
+
+# --- RUTAS DE ÓRDENES ---
+@app.post("/trade/order")
+def place_order(ticker: str, quantity: int, target_price: float, side: str, current_user: dict = Depends(get_current_user)):
+    if quantity <= 0 or target_price <= 0:
+        return {"status": "error", "message": "Cantidad y precio deben ser mayores a 0"}
+    
+    if side not in ["buy", "sell"]:
+        return {"status": "error", "message": "Side debe ser 'buy' o 'sell'"}
+        
+    order_id = create_order(current_user["email"], ticker.upper(), quantity, target_price, side)
+    return {"status": "success", "message": f"Orden de {side} para {ticker} creada", "order_id": order_id}
+
+@app.get("/user/orders")
+def get_user_orders(current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    orders = list(db_conn.orders.find({"email": current_user["email"]}).sort("timestamp", -1))
+    for o in orders:
+        if "_id" in o:
+            o["_id"] = str(o["_id"])
+    return {"status": "success", "orders": orders}
 
 @app.get("/wallet/history")
 def transaction_history(current_user: dict = Depends(get_current_user)):

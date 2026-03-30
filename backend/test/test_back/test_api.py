@@ -1,243 +1,248 @@
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+"""
+Script de testing automatizado — VERSION CON OUTPUT LIMPIO
+"""
+import requests
 import sys
-import os
-import warnings
-import pandas as pd
-import hashlib
 
-# Filtrar DeprecationWarning de httpx (causado por versiones antiguas de FastAPI/Starlette con httpx nuevo)
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
+BASE_URL = "http://127.0.0.1:8001"
+TEST_EMAIL = "test_auto@acciones.com"
+TEST_PASSWORD = "TestPass123!"
+TOKEN = None
 
-# Aseguramos que el directorio raíz esté en sys.path para permitir imports de backend
-# Asumiendo que test_api.py está en backend/test/test_back/
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+results = {"pass": 0, "fail": 0, "warn": 0}
+failed_tests = []
 
-from main import app
+def check(name, condition, detail=""):
+    if condition:
+        results["pass"] += 1
+        print(f"  PASS: {name}")
+    else:
+        results["fail"] += 1
+        msg = f"  FAIL: {name}"
+        if detail:
+            msg += f" [{detail}]"
+        print(msg)
+        failed_tests.append(name)
 
-client = TestClient(app)
+def warn(name, detail=""):
+    results["warn"] += 1
+    print(f"  WARN: {name}" + (f" [{detail}]" if detail else ""))
 
-# --- Fixtures ---
+def section(title):
+    print(f"\n--- {title} ---")
 
-@pytest.fixture
-def mock_db():
-    """Mock para la base de datos MongoDB."""
-    with patch("main.get_db") as mock:
-        db = MagicMock()
-        mock.return_value = db
-        yield db
+section("1. Health Check")
+try:
+    r = requests.get(f"{BASE_URL}/", timeout=5)
+    check("Servidor responde en /", r.status_code == 200)
+    check("Respuesta contiene mensaje", "message" in r.json())
+except Exception as e:
+    check("Servidor responde en /", False, str(e))
+    print("ERROR CRITICO: Servidor no disponible. Abortando.")
+    sys.exit(1)
 
-@pytest.fixture
-def mock_stock_services():
-    """Mock para los servicios de datos y ML."""
-    with patch("main.get_stock_info") as mock_info, \
-         patch("main.get_price_history") as mock_hist, \
-         patch("main.smart_recommendation") as mock_smart, \
-         patch("main.basic_recommendation") as mock_basic, \
-         patch("main.tickers_from_usage") as mock_tickers:
-        
-        yield {
-            "info": mock_info,
-            "hist": mock_hist,
-            "smart": mock_smart,
-            "basic": mock_basic,
-            "tickers": mock_tickers
-        }
+section("2. Auth - Registro y Login")
 
-# --- Tests de API ---
+try:
+    r = requests.post(f"{BASE_URL}/register", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+    data = r.json()
+    if data.get("status") == "success":
+        check("Registro de nuevo usuario", True)
+    else:
+        warn("Registro", data.get('message', ''))
+except Exception as e:
+    check("Registro de nuevo usuario", False, str(e))
 
-def test_read_root():
-    """Test del endpoint raíz."""
-    response = client.get("/")
-    assert response.status_code == 200
-    assert response.json() == {"message": "API de Acciones Inteligentes funcionando correctamente"}
+try:
+    r = requests.post(f"{BASE_URL}/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+    data = r.json()
+    check("Login exitoso", data.get("status") == "success")
+    check("Login retorna token", "access_token" in data)
+    TOKEN = data.get("access_token")
+except Exception as e:
+    check("Login exitoso", False, str(e))
 
-def test_get_user_found(mock_db):
-    """Test para obtener usuario existente."""
-    mock_db.users.find_one.return_value = {"email": "test@example.com", "name": "Test User"}
+try:
+    r = requests.post(f"{BASE_URL}/login", json={"email": TEST_EMAIL, "password": "MAL!"})
+    data = r.json()
+    check("Login con pass incorrecta - error", data.get("status") == "error")
+except Exception as e:
+    check("Login con pass incorrecta - error", False, str(e))
+
+if TOKEN:
+    try:
+        r = requests.get(f"{BASE_URL}/me", headers={"Authorization": f"Bearer {TOKEN}"})
+        data = r.json()
+        check("GET /me con token", r.status_code == 200 and "email" in data)
+        check("GET /me no expone password", "password" not in data)
+    except Exception as e:
+        check("GET /me con token", False, str(e))
     
-    response = client.get("/user/test@example.com")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "success"
-    assert data["user"]["email"] == "test@example.com"
+    try:
+        r = requests.get(f"{BASE_URL}/me")
+        check("GET /me sin token - 401", r.status_code == 401)
+    except Exception as e:
+        check("GET /me sin token - 401", False, str(e))
 
-def test_get_user_not_found(mock_db):
-    """Test para usuario no encontrado."""
-    mock_db.users.find_one.return_value = None
-    
-    response = client.get("/user/unknown@example.com")
-    assert response.status_code == 200
-    assert response.json()["status"] == "error"
-    assert response.json()["message"] == "Usuario no encontrado"
+section("3. Datos de Mercado")
 
-def test_recommendation_endpoint(mock_stock_services):
-    """Test del endpoint POST /recomendacion."""
-    mock_stock_services["info"].return_value = {
-        "name": "Apple Inc.",
-        "price": 150.0,
-        "change": 1.5,
-        "volume": 1000000
-    }
-    mock_stock_services["basic"].return_value = "Mantener"
+try:
+    r = requests.get(f"{BASE_URL}/market", timeout=30)
+    data = r.json()
+    check("GET /market responde", r.status_code == 200 and isinstance(data, list))
+    check("GET /market retorna datos", len(data) > 0)
+    if data:
+        first = data[0]
+        check("Accion tiene ticker y precio", "ticker" in first and "precio" in first)
+        check("variacion es numerica", isinstance(first.get("variacion"), (int, float)))
+        check("NO hay cripto (BTC/ETH)", not any(t.get("ticker") in ["BTC-USD", "ETH-USD"] for t in data))
+except Exception as e:
+    check("GET /market responde", False, str(e))
 
-    response = client.post("/recomendacion?ticker=AAPL")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ticker"] == "AAPL"
-    assert data["recomendacion"] == "Mantener"
-    assert data["nombre"] == "Apple Inc."
+try:
+    r = requests.get(f"{BASE_URL}/popular", timeout=30)
+    data = r.json()
+    check("GET /popular responde", r.status_code == 200 and isinstance(data, list))
+    if data:
+        check("Popular tiene campo history", "history" in data[0])
+except Exception as e:
+    check("GET /popular responde", False, str(e))
 
-def test_recommendation_endpoint_no_info(mock_stock_services):
-    """Test /recomendacion cuando no se encuentra info."""
-    mock_stock_services["info"].return_value = None
+try:
+    r = requests.get(f"{BASE_URL}/predict/AAPL", timeout=30)
+    data = r.json()
+    check("GET /predict/AAPL responde", r.status_code == 200)
+    check("Tiene precio y recomendacion", "precio" in data and "recomendacion" in data)
+    check("Tiene OHLC para graficos", "ohlc" in data and isinstance(data["ohlc"], list))
+except Exception as e:
+    check("GET /predict/AAPL responde", False, str(e))
 
-    response = client.post("/recomendacion?ticker=INVALID")
-    assert response.status_code == 200
-    assert response.json() == {"error": "No se pudo obtener información para el ticker"}
+section("4. Billetera y Portfolio")
 
-def test_predict_endpoint_success(mock_stock_services):
-    """Test GET /predict/{ticker} exitoso."""
-    mock_stock_services["smart"].return_value = "Compra Fuerte"
-    mock_stock_services["info"].return_value = {"price": 150.0}
-    # Simulamos historial como una Serie de pandas (caso 2 en main.py)
-    mock_stock_services["hist"].return_value = pd.Series([100.0, 110.0, 120.0], name="Close")
+if TOKEN:
+    H = {"Authorization": f"Bearer {TOKEN}"}
     
-    response = client.get("/predict/AAPL")
-    assert response.status_code == 200
-    data = response.json()
+    try:
+        r = requests.get(f"{BASE_URL}/wallet/info", headers=H, timeout=15)
+        data = r.json()
+        check("GET /wallet/info responde", data.get("status") == "success")
+        wallet = data.get("wallet", {})
+        check("Wallet tiene balance", "balance" in wallet)
+        check("Wallet tiene total_equity", "total_equity" in wallet)
+        check("Wallet tiene portfolio_details", "portfolio_details" in wallet)
+        check("total_equity >= balance", wallet.get("total_equity", 0) >= wallet.get("balance", 0))
+    except Exception as e:
+        check("GET /wallet/info responde", False, str(e))
     
-    assert data["ticker"] == "AAPL"
-    assert data["recomendacion"] == "Compra Fuerte"
-    assert data["precio"] == 150.0
-    assert data["history"] == [100.0, 110.0, 120.0]
+    try:
+        r = requests.post(f"{BASE_URL}/wallet/deposit?amount=1000", headers=H)
+        data = r.json()
+        check("POST /wallet/deposit monto valido", data.get("status") == "success")
+    except Exception as e:
+        check("POST /wallet/deposit monto valido", False, str(e))
     
-    # Verificar que smart_recommendation se llamó con los parámetros correctos según main.py
-    mock_stock_services["smart"].assert_called_with("AAPL", registrar=True, model_type="global_xgb")
+    try:
+        r = requests.post(f"{BASE_URL}/wallet/deposit?amount=-50", headers=H)
+        data = r.json()
+        check("POST /wallet/deposit monto negativo - error", data.get("status") == "error")
+    except Exception as e:
+        check("POST /wallet/deposit monto negativo - error", False, str(e))
 
-def test_predict_endpoint_exception(mock_stock_services):
-    """Test GET /predict/{ticker} manejando excepciones."""
-    # Hacemos que get_stock_info lance excepción para simular fallo general
-    mock_stock_services["info"].side_effect = Exception("API Error")
-    
-    response = client.get("/predict/FAIL")
-    assert response.status_code == 200
-    data = response.json()
-    # Verifica el comportamiento de fallback definido en main.py línea 108
-    assert data["recomendacion"] == "Servidor en mantenimiento"
-    assert data["precio"] == 0.0
+section("5. Trading")
 
-def test_get_popular_stocks(mock_stock_services):
-    """Test GET /popular."""
-    mock_stock_services["tickers"].return_value = ["AAPL", "GOOGL"]
+if TOKEN:
+    H = {"Authorization": f"Bearer {TOKEN}"}
     
-    # Configuramos side_effect para devolver info distinta para cada ticker
-    def get_info_side_effect(ticker):
-        if ticker == "AAPL":
-            return {"name": "Apple", "price": 150, "change": 1.0}
-        elif ticker == "GOOGL":
-            return {"name": "Google", "price": 2800, "change": -0.5}
-        return None
+    try:
+        r = requests.post(f"{BASE_URL}/trade/buy?ticker=AAPL&quantity=1", headers=H, timeout=15)
+        data = r.json()
+        check("Compra 1 AAPL exitosa", data.get("status") == "success", data.get("message", ""))
+        check("Respuesta tiene price_paid", "price_paid" in data)
+    except Exception as e:
+        check("Compra 1 AAPL exitosa", False, str(e))
     
-    mock_stock_services["info"].side_effect = get_info_side_effect
+    try:
+        r = requests.post(f"{BASE_URL}/trade/buy?ticker=AAPL&quantity=0", headers=H)
+        data = r.json()
+        check("Compra con qty=0 - error", data.get("status") == "error")
+    except Exception as e:
+        check("Compra con qty=0 - error", False, str(e))
     
-    # Historial simple
-    mock_stock_services["hist"].return_value = pd.Series([100, 101, 102], name="Close")
+    try:
+        r = requests.post(f"{BASE_URL}/trade/buy?ticker=AAPL&quantity=999999", headers=H, timeout=15)
+        data = r.json()
+        check("Compra con saldo insuficiente - error", data.get("status") == "error")
+        check("Mensaje menciona saldo", "saldo" in data.get("message", "").lower() or "insuficiente" in data.get("message", "").lower())
+    except Exception as e:
+        check("Compra con saldo insuficiente - error", False, str(e))
+    
+    try:
+        r = requests.post(f"{BASE_URL}/trade/sell?ticker=AAPL&quantity=1", headers=H, timeout=15)
+        data = r.json()
+        check("Venta 1 AAPL exitosa", data.get("status") == "success", data.get("message", ""))
+    except Exception as e:
+        check("Venta 1 AAPL exitosa", False, str(e))
+    
+    try:
+        r = requests.post(f"{BASE_URL}/trade/sell?ticker=TSLA&quantity=9999", headers=H, timeout=15)
+        data = r.json()
+        check("Venta sin existencias - error", data.get("status") == "error")
+    except Exception as e:
+        check("Venta sin existencias - error", False, str(e))
 
-    response = client.get("/popular")
-    assert response.status_code == 200
-    data = response.json()
-    
-    assert len(data) == 2
-    assert data[0]["ticker"] == "AAPL"
-    assert data[1]["ticker"] == "GOOGL"
-    assert data[0]["color_green"] is True  # change 1.0 >= 0
-    assert data[1]["color_green"] is False # change -0.5 < 0
+section("6. Watchlist")
 
-def test_save_user_decision_feedback(mock_db):
-    """Test GET /feedback."""
-    mock_db.acciones_usuario.update_one.return_value = MagicMock()
+if TOKEN:
+    H = {"Authorization": f"Bearer {TOKEN}"}
     
-    response = client.get("/feedback?ticker=AAPL&decision=comprar")
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
+    try:
+        r = requests.post(f"{BASE_URL}/user/watchlist/NVDA", headers=H)
+        check("Agregar NVDA a watchlist", r.json().get("status") == "success")
+    except Exception as e:
+        check("Agregar NVDA a watchlist", False, str(e))
     
-    # Verificar llamada a DB
-    mock_db.acciones_usuario.update_one.assert_called_once()
+    try:
+        r = requests.get(f"{BASE_URL}/user/watchlist", headers=H, timeout=20)
+        data = r.json()
+        check("GET /user/watchlist responde", data.get("status") == "success")
+        check("NVDA en watchlist", any(w.get("ticker") == "NVDA" for w in data.get("watchlist", [])))
+    except Exception as e:
+        check("GET /user/watchlist responde", False, str(e))
+    
+    try:
+        r = requests.delete(f"{BASE_URL}/user/watchlist/NVDA", headers=H)
+        check("Eliminar NVDA de watchlist", r.json().get("status") == "success")
+    except Exception as e:
+        check("Eliminar NVDA de watchlist", False, str(e))
 
-# --- Auth Tests ---
+section("7. Historial")
 
-def test_register_success(mock_db):
-    """Test registro de usuario nuevo."""
-    mock_db.users.find_one.return_value = None # No existe
-    
-    payload = {"email": "newuser@test.com", "password": "password123"}
-    response = client.post("/register", json=payload)
-    
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    mock_db.users.insert_one.assert_called_once()
+if TOKEN:
+    H = {"Authorization": f"Bearer {TOKEN}"}
+    try:
+        r = requests.get(f"{BASE_URL}/wallet/history", headers=H)
+        data = r.json()
+        check("GET /wallet/history responde", data.get("status") == "success")
+        check("Historial es una lista", isinstance(data.get("transactions", []), list))
+        txns = data.get("transactions", [])
+        if txns:
+            check("Transaccion tiene ticker, price, type", all(k in txns[0] for k in ["ticker", "price", "side"]))
+    except Exception as e:
+        check("GET /wallet/history responde", False, str(e))
 
-def test_register_existing_user(mock_db):
-    """Test registro de usuario existente falla."""
-    mock_db.users.find_one.return_value = {"email": "exists@test.com"}
-    
-    payload = {"email": "exists@test.com", "password": "password123"}
-    response = client.post("/register", json=payload)
-    
-    assert response.status_code == 200
-    assert response.json()["status"] == "error"
-    assert response.json()["message"] == "El usuario ya existe"
+# === RESUMEN FINAL ===
+total = results["pass"] + results["fail"] + results["warn"]
+score = (results["pass"] / max(total, 1)) * 100
+print(f"\n{'='*50}")
+print(f"RESUMEN FINAL: {total} tests")
+print(f"  PASS: {results['pass']}")
+print(f"  FAIL: {results['fail']}")  
+print(f"  WARN: {results['warn']}")
+print(f"  Score: {score:.1f}%")
+if failed_tests:
+    print(f"\nTests fallidos:")
+    for t in failed_tests:
+        print(f"  - {t}")
+print(f"{'='*50}")
 
-def test_login_success(mock_db):
-    """Test login exitoso."""
-    # Hash password "secret" -> sha256
-    hashed_pw = hashlib.sha256(b"secret").hexdigest()
-    
-    mock_db.users.find_one.return_value = {
-        "email": "user@test.com", 
-        "password": hashed_pw
-    }
-
-    payload = {"email": "user@test.com", "password": "secret"}
-    response = client.post("/login", json=payload)
-    
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "success"
-    assert data["email"] == "user@test.com"
-
-def test_login_failure(mock_db):
-    """Test login fallido (password incorrecto)."""
-    hashed_pw = hashlib.sha256(b"secret").hexdigest()
-    mock_db.users.find_one.return_value = {
-        "email": "user@test.com", 
-        "password": hashed_pw
-    }
-
-    payload = {"email": "user@test.com", "password": "wrongpassword"}
-    response = client.post("/login", json=payload)
-    
-    assert response.status_code == 200
-    assert response.json()["status"] == "error"
-
-def test_save_decision_post(mock_db):
-    """Test POST /decision."""
-    mock_db.acciones_usuario.update_one.return_value.modified_count = 1
-    
-    payload = {"ticker": "MSFT", "decision": "no comprar"}
-    response = client.post("/decision", json=payload)
-    
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
-
-def test_save_decision_post_not_found(mock_db):
-    """Test POST /decision cuando no se encuentra registro previo."""
-    mock_db.acciones_usuario.update_one.return_value.modified_count = 0
-    
-    payload = {"ticker": "MSFT", "decision": "no comprar"}
-    response = client.post("/decision", json=payload)
-    
-    assert response.status_code == 200
-    assert response.json()["status"] == "info"
+sys.exit(0 if results["fail"] == 0 else 1)

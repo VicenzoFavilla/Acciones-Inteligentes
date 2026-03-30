@@ -9,3 +9,5 @@ models/
 ai/
 venv/
 .env
+.git/index.lock
+.git/index

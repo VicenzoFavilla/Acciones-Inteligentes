@@ -24,7 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Por favor, completa todos los campos")),
+        const SnackBar(content: Text("Por favor, completa todos los campos"), backgroundColor: Colors.red),
       );
       return;
     }
@@ -65,7 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           } else {
              ScaffoldMessenger.of(context).showSnackBar(
-               SnackBar(content: Text(data['message'] ?? "Registro exitoso. Inicia sesión.")),
+               SnackBar(content: Text(data['message'] ?? "Registro exitoso. Inicia sesión."), backgroundColor: Colors.green),
              );
              setState(() => _isLogin = true); // Switch to login after register
           }
@@ -91,7 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 30),
@@ -104,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: GoogleFonts.poppins(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: Theme.of(context).textTheme.headlineMedium?.color,
                 ),
               ),
               const SizedBox(height: 10),
@@ -114,7 +114,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   : "Regístrate para comenzar a invertir",
                 style: GoogleFonts.poppins(
                   fontSize: 16,
-                  color: Colors.grey[600],
+                  color: Colors.grey,
                 ),
               ),
               const SizedBox(height: 40),
@@ -131,7 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _submit,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
+                    backgroundColor: Colors.lightBlueAccent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     elevation: 5,
                   ),
@@ -165,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextSpan(
                           text: _isLogin ? "Regístrate" : "Inicia Sesión",
                           style: GoogleFonts.poppins(
-                            color: Colors.blueAccent,
+                            color: Colors.lightBlueAccent,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -183,12 +183,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Widget _buildTextField(String hint, IconData icon, TextEditingController controller, {bool isPassword = false}) {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+        decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withAlpha(13),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -197,10 +197,11 @@ class _LoginScreenState extends State<LoginScreen> {
       child: TextField(
         controller: controller,
         obscureText: isPassword,
+        style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: Colors.blueAccent),
+          prefixIcon: Icon(icon, color: Colors.lightBlueAccent),
           hintText: hint,
-          hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
+          hintStyle: GoogleFonts.poppins(color: Colors.grey),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
         ),

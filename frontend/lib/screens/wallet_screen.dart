@@ -13,7 +13,8 @@ class WalletScreen extends StatefulWidget {
 
 class _WalletScreenState extends State<WalletScreen> {
   double balance = 0.0;
-  Map<String, dynamic> portfolio = {};
+  double totalEquity = 0.0;
+  List<dynamic> portfolioDetails = [];
   bool isLoading = true;
   String? token;
 
@@ -42,7 +43,8 @@ class _WalletScreenState extends State<WalletScreen> {
         final data = json.decode(response.body);
         setState(() {
           balance = (data['wallet']['balance'] as num).toDouble();
-          portfolio = Map<String, dynamic>.from(data['wallet']['portfolio'] ?? {});
+          totalEquity = (data['wallet']['total_equity'] as num).toDouble();
+          portfolioDetails = List<dynamic>.from(data['wallet']['portfolio_details'] ?? []);
         });
       } else {
         debugPrint("Server error wallet: ${response.statusCode}");
@@ -61,11 +63,18 @@ class _WalletScreenState extends State<WalletScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
 
+      final data = json.decode(response.body);
       if (response.statusCode == 200) {
-        _fetchWalletData();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Depósito de \$$amount exitoso')),
-        );
+        if (data['status'] == 'success') {
+          _fetchWalletData();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(data['message'] ?? 'Depósito exitoso'), backgroundColor: Colors.green),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(data['message'] ?? 'Error al depositar'), backgroundColor: Colors.red),
+          );
+        }
       }
     } catch (e) {
       debugPrint("Error depositing: $e");
@@ -107,14 +116,21 @@ class _WalletScreenState extends State<WalletScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
 
+      final data = json.decode(response.body);
       if (response.statusCode == 200) {
-        _fetchWalletData();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Venta de $quantity acciones de $ticker exitosa')),
-        );
+        if (data['status'] == 'success') {
+          _fetchWalletData();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(data['message'] ?? 'Venta exitosa'), backgroundColor: Colors.green),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(data['message'] ?? 'Error al vender'), backgroundColor: Colors.red),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error al vender acciones')),
+          SnackBar(content: Text(data['message'] ?? 'Error del servidor'), backgroundColor: Colors.red),
         );
       }
     } catch (e) {
@@ -154,12 +170,9 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text("Mi Billetera", style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
+        title: Text("Mi Billetera", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -170,7 +183,7 @@ class _WalletScreenState extends State<WalletScreen> {
                 children: [
                   _buildBalanceCard(),
                   const SizedBox(height: 30),
-                  Text("Mi Portafolio", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text("Mi Portafolio", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
                   const SizedBox(height: 15),
                   _buildPortfolioList(),
                 ],
@@ -182,27 +195,46 @@ class _WalletScreenState extends State<WalletScreen> {
   Widget _buildBalanceCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(30),
+      padding: const EdgeInsets.all(25),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFF2196F3), Color(0xFF21CBF3)]),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0D47A1), Color(0xFF00BFFF)],
+        ),
         borderRadius: BorderRadius.circular(25),
-        boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 10))],
+        boxShadow: [BoxShadow(color: Colors.lightBlueAccent.withAlpha(51), blurRadius: 15, offset: const Offset(0, 10))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Saldo Disponible", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 16)),
-          Text("\$${balance.toStringAsFixed(2)}", 
-            style: GoogleFonts.poppins(color: Colors.white, fontSize: 35, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _showDepositDialog,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.blueAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            ),
-            child: const Text("Depositar Fondos"),
+          Text("Patrimonio Total", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14)),
+          Text("\$${totalEquity.toStringAsFixed(2)}", 
+            style: GoogleFonts.poppins(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 15),
+          Divider(color: Colors.white.withAlpha(51)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Saldo en Efectivo", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
+                  Text("\$${balance.toStringAsFixed(2)}", style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              ElevatedButton(
+                onPressed: _showDepositDialog,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withAlpha(51),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text("Depositar"),
+              ),
+            ],
           ),
         ],
       ),
@@ -210,7 +242,7 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Widget _buildPortfolioList() {
-    if (portfolio.isEmpty) {
+    if (portfolioDetails.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(20),
         child: const Center(
@@ -224,45 +256,83 @@ class _WalletScreenState extends State<WalletScreen> {
     }
 
     return Column(
-      children: portfolio.entries.map((entry) {
-        final String ticker = entry.key;
-        final int quantity = entry.value;
+      children: portfolioDetails.map<Widget>((asset) {
+        final String ticker = asset['ticker'];
+        final int quantity = asset['quantity'];
+        final double avgPrice = (asset['average_price'] as num).toDouble();
+        final double pnlPct = (asset['pnl_pct'] as num).toDouble();
+        final double pnlAbs = (asset['pnl_abs'] as num).toDouble();
+        
+        final bool isUp = pnlAbs >= 0;
+        final Color pnlColor = isUp ? Colors.greenAccent : Colors.redAccent;
+
         return Container(
           margin: const EdgeInsets.only(bottom: 15),
           padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(20),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
+            border: Border.all(color: Theme.of(context).dividerColor.withAlpha(26)),
+            boxShadow: [BoxShadow(color: Colors.black.withAlpha(13), blurRadius: 10)],
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
             children: [
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  CircleAvatar(
-                    backgroundColor: Colors.blue.withOpacity(0.1),
-                    child: Text(ticker[0], style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(width: 15),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Row(
                     children: [
-                      Text(ticker, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
-                      Text("$quantity acciones", style: GoogleFonts.poppins(color: Colors.grey, fontSize: 13)),
+                      CircleAvatar(
+                        backgroundColor: Colors.lightBlueAccent.withAlpha(26),
+                        child: Text(ticker[0], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
+                      ),
+                      const SizedBox(width: 15),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(ticker, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).textTheme.bodyLarge?.color)),
+                          Text("$quantity acciones", style: GoogleFonts.poppins(color: Colors.grey, fontSize: 13)),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        "${isUp ? '+' : ''}${pnlPct.toStringAsFixed(2)}%", 
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 15, color: pnlColor)
+                      ),
+                      Text(
+                        "${isUp ? '+' : ''}\$${pnlAbs.toStringAsFixed(2)}", 
+                        style: GoogleFonts.poppins(fontSize: 12, color: pnlColor.withAlpha(204))
+                      ),
                     ],
                   ),
                 ],
               ),
-              ElevatedButton(
-                onPressed: () => _showSellDialog(ticker, quantity),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent.withOpacity(0.1),
-                  foregroundColor: Colors.redAccent,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                child: const Text("Vender"),
+              const SizedBox(height: 15),
+              Divider(color: Theme.of(context).dividerColor.withAlpha(26), height: 1),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "P. Promedio: \$${avgPrice.toStringAsFixed(2)}", 
+                    style: GoogleFonts.poppins(color: Colors.grey[500], fontSize: 12)
+                  ),
+                  GestureDetector(
+                    onTap: () => _showSellDialog(ticker, quantity),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withAlpha(26),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text("Vender", style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

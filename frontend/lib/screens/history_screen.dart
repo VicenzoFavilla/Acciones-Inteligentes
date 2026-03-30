@@ -55,12 +55,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text("Historial de Operaciones", style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
+        title: Text("Historial de Operaciones", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -71,14 +68,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   itemCount: transactions.length,
                   itemBuilder: (context, index) {
                     final t = transactions[index];
-                    final isBuy = t['type'] == 'buy';
+                    final isBuy = (t['side'] ?? t['type']) == 'buy';
                     return Container(
                       margin: const EdgeInsets.only(bottom: 15),
                       padding: const EdgeInsets.all(15),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(20),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
                       ),
                       child: Row(
                         children: [
@@ -92,7 +89,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text('${isBuy ? "Compra" : "Venta"} de ${t['ticker']}', 
-                                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Theme.of(context).textTheme.bodyLarge?.color)),
                                 Text('${t['quantity']} acciones a \$${t['price']}', 
                                   style: GoogleFonts.poppins(color: Colors.grey, fontSize: 13)),
                               ],
@@ -100,7 +97,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           ),
                           Text(
                             _formatDate(t['timestamp']),
-                            style: GoogleFonts.poppins(color: Colors.black54, fontSize: 12),
+                            style: GoogleFonts.poppins(color: Colors.grey, fontSize: 12),
                           ),
                         ],
                       ),

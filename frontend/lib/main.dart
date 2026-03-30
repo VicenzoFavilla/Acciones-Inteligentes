@@ -7,18 +7,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:candlesticks/candlesticks.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-// Pantallas externas (Asegúrate de que los archivos existan)
-import 'screens/profile_screen.dart';
+// Pantallas externas
 import 'screens/settings_screen.dart';
-import 'screens/premium_screen.dart';
-import 'screens/faq_screen.dart';
 import 'screens/login.dart';
 import 'screens/wallet_screen.dart';
 import 'screens/history_screen.dart';
 
+// Notificador global para el tema
+final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
+  
+  // Cargar tema guardado
+  final String? savedTheme = prefs.getString('theme_mode');
+  if (savedTheme == 'light') {
+    themeNotifier.value = ThemeMode.light;
+  } else {
+    themeNotifier.value = ThemeMode.dark;
+  }
+
   final email = prefs.getString('user_email');
   runApp(MyApp(initialEmail: email));
 }
@@ -29,14 +38,52 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Acciones Inteligentes',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primaryColor: Colors.blueAccent,
-        textTheme: GoogleFonts.poppinsTextTheme(),
-      ),
-      home: initialEmail != null ? const MainDashboard() : const LoginScreen(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (_, ThemeMode currentMode, __) {
+        return MaterialApp(
+          title: 'Acciones Inteligentes',
+          debugShowCheckedModeBanner: false,
+          themeMode: currentMode,
+          // TEMA CLARO
+          theme: ThemeData(
+            brightness: Brightness.light,
+            primaryColor: Colors.lightBlueAccent,
+            scaffoldBackgroundColor: const Color(0xFFF5F7FA),
+            cardColor: Colors.white,
+            textTheme: GoogleFonts.poppinsTextTheme(ThemeData.light().textTheme),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black87,
+              elevation: 0,
+            ),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.lightBlueAccent,
+              brightness: Brightness.light,
+              primary: Colors.lightBlueAccent,
+            ),
+          ),
+          // TEMA OSCURO
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            primaryColor: Colors.lightBlueAccent,
+            scaffoldBackgroundColor: const Color(0xFF121212),
+            cardColor: const Color(0xFF1E1E1E),
+            textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Color(0xFF1E1E1E),
+              foregroundColor: Colors.white,
+              elevation: 0,
+            ),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.lightBlueAccent,
+              brightness: Brightness.dark,
+              primary: Colors.lightBlueAccent,
+            ),
+          ),
+          home: initialEmail != null ? const MainDashboard() : const LoginScreen(),
+        );
+      },
     );
   }
 }
@@ -197,7 +244,7 @@ class _MainDashboardState extends State<MainDashboard> {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión'), backgroundColor: Colors.red));
       return;
     }
 
@@ -250,31 +297,43 @@ class _MainDashboardState extends State<MainDashboard> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: _buildDrawer(),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 25.0),
+            padding: const EdgeInsets.symmetric(horizontal: 20.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 30),
                 _buildHeader(),
                 const SizedBox(height: 10),
-                Text("¿Qué acción analizamos hoy?", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 16)),
+                Text("¿Qué acción analizamos hoy?", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodyMedium?.color?.withAlpha(179), fontSize: 16)),
                 const SizedBox(height: 25),
                 _buildSearchBar(),
                 const SizedBox(height: 35),
-                Text("Recomendaciones Populares", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text("Acciones Populares", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
                 const SizedBox(height: 15),
                 _buildPopularList(),
                 const SizedBox(height: 35),
-                Text("Mis Favoritos", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                   children: [
+                      Icon(Icons.star, color: Colors.lightBlueAccent, size: 20),
+                      const SizedBox(width: 8),
+                      Text("Mis Favoritos", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                   ],
+                ),
                 const SizedBox(height: 15),
                 _buildWatchlistTable(),
                 const SizedBox(height: 35),
-                Text("Mercado de Acciones", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                   children: [
+                      Icon(Icons.trending_up, color: Colors.lightBlueAccent, size: 20),
+                      const SizedBox(width: 8),
+                      Text("Mercado de Acciones", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                   ],
+                ),
                 const SizedBox(height: 15),
                 _buildMarketTable(),
                 const SizedBox(height: 30),
@@ -291,11 +350,11 @@ class _MainDashboardState extends State<MainDashboard> {
     return Row(
       children: [
         IconButton(
-          icon: const Icon(Icons.menu, size: 30, color: Colors.black87),
+          icon: const Icon(Icons.menu, size: 30, color: Colors.lightBlueAccent),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
         const SizedBox(width: 8),
-        Text("Acciones Inteligentes", style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold)),
+        Text("Acciones Inteligentes", style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: Theme.of(context).textTheme.headlineMedium?.color)),
       ],
     );
   }
@@ -314,29 +373,29 @@ class _MainDashboardState extends State<MainDashboard> {
 
   Widget _buildWatchlistTable() {
     if (isLoadingWatchlist) return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
-    if (watchlist.isEmpty) return Padding(padding: const EdgeInsets.only(left: 5), child: Text("Aún no tienes favoritos. Toca la estrella para agregar uno.", style: GoogleFonts.poppins(color: Colors.grey[600])));
+    if (watchlist.isEmpty) return Padding(padding: const EdgeInsets.only(left: 5), child: Text("Aún no tienes favoritos. Toca la estrella para agregar uno.", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color)));
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(25),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withAlpha(51) : Colors.grey.withAlpha(51), blurRadius: 15, offset: const Offset(0, 8))],
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
           Row(
             children: [
-              Expanded(flex: 3, child: Text("Nombre", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
-              Expanded(flex: 2, child: Text("Precio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
-              Expanded(flex: 2, child: Text("24h Cambio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
-              Expanded(flex: 2, child: Text("Volumen", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
-              Expanded(flex: 2, child: Text("Cap. mercado", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
-              Expanded(flex: 1, child: Text("Acciones", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.center)),
+              Expanded(flex: 3, child: Text("Nombre", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12))),
+              Expanded(flex: 2, child: Text("Precio", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12))),
+              Expanded(flex: 2, child: Text("24h Cambio", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Volumen", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Cap. mercado", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 1, child: Text("Acciones", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.center)),
             ],
           ),
           const SizedBox(height: 15),
-          Divider(color: Colors.grey[200], height: 1),
+          Divider(color: Theme.of(context).dividerColor, height: 1),
           const SizedBox(height: 10),
           ...watchlist.map((market) => _buildMarketRow(Map<String, dynamic>.from(market))).toList(),
         ],
@@ -350,9 +409,9 @@ class _MainDashboardState extends State<MainDashboard> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(25),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withAlpha(51) : Colors.grey.withAlpha(51), blurRadius: 15, offset: const Offset(0, 8))],
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -360,16 +419,16 @@ class _MainDashboardState extends State<MainDashboard> {
           // Header
           Row(
             children: [
-              Expanded(flex: 3, child: Text("Nombre", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
-              Expanded(flex: 2, child: Text("Precio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12))),
-              Expanded(flex: 2, child: Text("24h Cambio", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
-              Expanded(flex: 2, child: Text("Volumen", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
-              Expanded(flex: 2, child: Text("Cap. mercado", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.right)),
-              Expanded(flex: 1, child: Text("Acciones", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12), textAlign: TextAlign.center)),
+              Expanded(flex: 3, child: Text("Nombre", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12))),
+              Expanded(flex: 2, child: Text("Precio", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12))),
+              Expanded(flex: 2, child: Text("24h Cambio", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Volumen", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 2, child: Text("Cap. mercado", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.right)),
+              Expanded(flex: 1, child: Text("Acciones", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12), textAlign: TextAlign.center)),
             ],
           ),
           const SizedBox(height: 15),
-          Divider(color: Colors.grey[200], height: 1),
+          Divider(color: Theme.of(context).dividerColor, height: 1),
           const SizedBox(height: 10),
           // Filas
           ...marketList.map((market) => _buildMarketRow(Map<String, dynamic>.from(market))).toList(),
@@ -409,9 +468,9 @@ class _MainDashboardState extends State<MainDashboard> {
                 Expanded(
                   child: Row(
                     children: [
-                      Text(ticker, style: GoogleFonts.poppins(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 14)),
+                      Text(ticker, style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold, fontSize: 14)),
                       const SizedBox(width: 5),
-                      Expanded(child: Text(name, style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 11), overflow: TextOverflow.ellipsis)),
+                      Expanded(child: Text(name, style: GoogleFonts.poppins(color: Colors.grey, fontSize: 11), overflow: TextOverflow.ellipsis)),
                     ],
                   ),
                 ),
@@ -423,9 +482,9 @@ class _MainDashboardState extends State<MainDashboard> {
             flex: 2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("\$${price.toStringAsFixed(price < 1 ? 4 : 2)}", style: GoogleFonts.poppins(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13)),
-              ],
+               children: [
+                 Text("\$${price.toStringAsFixed(price < 1 ? 4 : 2)}", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold, fontSize: 13)),
+               ],
             ),
           ),
           // Cambio
@@ -440,15 +499,15 @@ class _MainDashboardState extends State<MainDashboard> {
             ),
           ),
           // Volumen
-          Expanded(
-            flex: 2,
-            child: Text(_formatNumber(volume), style: GoogleFonts.poppins(color: Colors.black87, fontSize: 13), textAlign: TextAlign.right),
-          ),
-          // Cap. Mercado
-          Expanded(
-            flex: 2,
-            child: Text(_formatNumber(marketCap), style: GoogleFonts.poppins(color: Colors.black87, fontSize: 13), textAlign: TextAlign.right),
-          ),
+           Expanded(
+             flex: 2,
+             child: Text(_formatNumber(volume), style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 13), textAlign: TextAlign.right),
+           ),
+           // Cap. Mercado
+           Expanded(
+             flex: 2,
+             child: Text(_formatNumber(marketCap), style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 13), textAlign: TextAlign.right),
+           ),
           // Acciones
           Expanded(
             flex: 1,
@@ -457,14 +516,14 @@ class _MainDashboardState extends State<MainDashboard> {
               children: [
                 GestureDetector(
                   onTap: () => _navigateToDetail(ticker),
-                  child: const Icon(Icons.analytics_outlined, color: Colors.black54, size: 18),
+                  child: const Icon(Icons.analytics_outlined, color: Colors.lightBlueAccent, size: 18),
                 ),
                 const SizedBox(width: 8),
                 GestureDetector(
                   onTap: () => _toggleWatchlist(ticker),
                   child: Icon(
                     watchlist.any((s) => s['ticker'] == ticker) ? Icons.star : Icons.star_border, 
-                    color: watchlist.any((s) => s['ticker'] == ticker) ? Colors.amber : Colors.black54, 
+                    color: watchlist.any((s) => s['ticker'] == ticker) ? Colors.lightBlueAccent : Theme.of(context).textTheme.bodySmall?.color, 
                     size: 18
                   ),
                 ),
@@ -499,16 +558,16 @@ class _MainDashboardState extends State<MainDashboard> {
         margin: const EdgeInsets.only(right: 15),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(25),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 8))],
+          boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withAlpha(26) : Colors.grey.withAlpha(26), blurRadius: 15, offset: const Offset(0, 8))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(ticker, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 22)),
-            Text("\$${double.parse(price).toStringAsFixed(2)}", style: GoogleFonts.poppins(fontSize: 18, color: Colors.black54)),
-            const SizedBox(height: 15),
+           children: [
+             Text(ticker, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 22, color: Theme.of(context).textTheme.titleLarge?.color)),
+             Text("\$${double.parse(price).toStringAsFixed(2)}", style: GoogleFonts.poppins(fontSize: 18, color: Theme.of(context).textTheme.bodyMedium?.color)),
+             const SizedBox(height: 15),
             
             // Gráfica con altura fija y validación de spots
             SizedBox(
@@ -526,7 +585,7 @@ class _MainDashboardState extends State<MainDashboard> {
                           color: trendColor,
                           barWidth: 3,
                           dotData: const FlDotData(show: false),
-                          belowBarData: BarAreaData(show: true, color: trendColor.withOpacity(0.1)),
+                          belowBarData: BarAreaData(show: true, color: trendColor.withAlpha(26)),
                         ),
                       ],
                     ),
@@ -544,17 +603,19 @@ class _MainDashboardState extends State<MainDashboard> {
   Widget _buildSearchBar() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFF1E1E1E),
         borderRadius: BorderRadius.circular(15),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+        boxShadow: [BoxShadow(color: Colors.black.withAlpha(51), blurRadius: 10)],
       ),
       child: TextField(
         controller: _tickerController,
-        decoration: const InputDecoration(
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
           hintText: "Buscar Ticker (ej: MSFT)",
-          prefixIcon: Icon(Icons.search, color: Colors.blueAccent),
+          hintStyle: GoogleFonts.poppins(color: Colors.grey[600]),
+          prefixIcon: const Icon(Icons.search, color: Colors.lightBlueAccent),
           border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(vertical: 15),
+          contentPadding: const EdgeInsets.symmetric(vertical: 15),
         ),
         onSubmitted: (value) => _navigateToDetail(value.toUpperCase()),
       ),
@@ -576,34 +637,35 @@ class _MainDashboardState extends State<MainDashboard> {
   Widget _buildDrawer() {
     return Drawer(
       child: Container(
-        color: const Color(0xFFB0B0B0),
+        color: Theme.of(context).cardColor,
         child: Column(
           children: [
             const SizedBox(height: 60),
             _userEmail != null 
               ? Column(
                   children: [
-                    const Icon(Icons.account_circle_outlined, size: 80, color: Colors.black87),
+                    const Icon(Icons.account_circle_outlined, size: 80, color: Colors.lightBlueAccent),
                     const SizedBox(height: 10),
                     if (_userName != null && _userName!.isNotEmpty)
-                      Text(_userName!, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    Text(_userEmail!, style: GoogleFonts.poppins(fontSize: 14, color: Colors.black54)),
+                      Text(_userName!, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Text(_userEmail!, style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[400])),
                   ],
                 )
               : const CircularProgressIndicator(),
             const SizedBox(height: 40),
             ListTile(
-              title: const Text('Configuración'),
+              leading: const Icon(Icons.settings_outlined, color: Colors.white70),
+              title: const Text('Configuración', style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())),
             ),
             ListTile(
-              leading: const Icon(Icons.account_balance_wallet_outlined, color: Colors.black87),
-              title: const Text('Mi Billetera'),
+              leading: const Icon(Icons.account_balance_wallet_outlined, color: Colors.white70),
+              title: const Text('Mi Billetera', style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const WalletScreen())),
             ),
             ListTile(
-              leading: const Icon(Icons.history, color: Colors.black87),
-              title: const Text('Historial'),
+              leading: const Icon(Icons.history, color: Colors.white70),
+              title: const Text('Historial', style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const HistoryScreen())),
             ),
             const Spacer(),
@@ -656,12 +718,12 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF5F7FA), 
+        backgroundColor: Theme.of(context).cardColor, 
         elevation: 0, 
-        iconTheme: const IconThemeData(color: Colors.black),
-        title: Text(widget.ticker, style: const TextStyle(color: Colors.black)),
+        iconTheme: IconThemeData(color: Theme.of(context).textTheme.bodyLarge?.color),
+        title: Text(widget.ticker, style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color)),
       ),
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: isLoading 
         ? const Center(child: CircularProgressIndicator())
         : data == null 
@@ -678,7 +740,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         children: [
           _buildHeaderCard(),
           const SizedBox(height: 25),
-          Text("AI Analysis", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text("AI Analysis", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 15),
           _buildAIRecommendationCard(),
           const SizedBox(height: 40),
@@ -705,14 +767,14 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
 
     return Container(
       padding: const EdgeInsets.all(25),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25)),
+      decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(25)),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(widget.ticker, style: GoogleFonts.poppins(fontSize: 35, fontWeight: FontWeight.bold)),
-              Text("\$${double.parse(price).toStringAsFixed(2)}", style: GoogleFonts.poppins(fontSize: 28, color: Colors.blueAccent)),
+              Text(widget.ticker, style: GoogleFonts.poppins(fontSize: 35, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text("\$${double.parse(price).toStringAsFixed(2)}", style: GoogleFonts.poppins(fontSize: 28, color: Colors.lightBlueAccent, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 20),
@@ -720,7 +782,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             height: 350,
             child: candles.isNotEmpty
               ? Theme(
-                  data: ThemeData.light(),
+                  data: ThemeData.dark(),
                   child: Candlesticks(
                     candles: candles,
                   ),
@@ -742,13 +804,13 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   return Container(
     padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
-      color: isBuy ? const Color(0xFFE8F5E9) : Colors.orange[50],
+      color: isBuy ? const Color(0xFF1B5E20).withAlpha(51) : const Color(0xFFBF360C).withAlpha(51),
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: isBuy ? Colors.green.withOpacity(0.3) : Colors.orange.withOpacity(0.3))
+      border: Border.all(color: isBuy ? Colors.greenAccent.withAlpha(77) : Colors.redAccent.withAlpha(77))
     ),
     child: Row(
       children: [
-        Icon(Icons.auto_awesome, color: isBuy ? Colors.green : Colors.orange),
+        Icon(Icons.auto_awesome, color: isBuy ? Colors.greenAccent : Colors.redAccent),
         const SizedBox(width: 15),
         Expanded(
           child: Column(
@@ -756,14 +818,14 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             children: [
               Text(
                 "ANÁLISIS DE IA",
-                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54),
+                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[400]),
               ),
               Text(
                 rawRec.toUpperCase(), // Mostrará "COMPRAR" o "NO_COMPRAR"
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.bold, 
                   fontSize: 18,
-                  color: isBuy ? Colors.green[900] : Colors.orange[900]
+                  color: isBuy ? Colors.greenAccent : Colors.redAccent
                 ),
               ),
             ],
@@ -777,9 +839,29 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   Widget _buildDecisionButtons() {
     return Row(
       children: [
-        Expanded(child: OutlinedButton(onPressed: () => _handleDecision("no compré"), child: const Text("No comprar"))),
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () => _handleDecision("no compré"), 
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white24),
+              foregroundColor: Colors.white70,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text("No comprar")
+          )
+        ),
         const SizedBox(width: 15),
-        Expanded(child: ElevatedButton(onPressed: _showBuyDialog, child: const Text("Comprar"))),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: _showBuyDialog, 
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.lightBlueAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text("Comprar")
+          )
+        ),
       ],
     );
   }
@@ -792,7 +874,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         body: json.encode({'ticker': widget.ticker, 'decision': decision}),
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Decisión registrada: $decision')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Decisión registrada: $decision'), backgroundColor: Colors.lightBlueAccent));
       }
     } catch (e) {
       debugPrint("Error saving decision: $e");
