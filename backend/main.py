@@ -1,21 +1,17 @@
-"""CLI del asesor de inversiones.
+import warnings
+# Silenciar ruidos de scikit-learn y otras librerías (especialmente UserWarning por batch_size)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*batch_size.*")
 
-Permite consultar un ticker, ver datos básicos y usar modelos ML
-(locales o globales) para obtener una recomendación.
-"""
-
-from services.stocks import get_stock_info, get_price_history
+from services.stocks import get_stock_info, get_price_history, get_sp500_tickers
 from ml.recomendacion import smart_recommendation, basic_recommendation
 from ml.global_models import tickers_from_usage
 from services.wallet import get_wallet, update_balance, add_transaction, buy_stock, sell_stock
 from services.orders import create_order, check_and_execute_orders
-
-from services.stocks import get_stock_info, get_price_history
 from config.db import get_db
 from pymongo import MongoClient
 import joblib
 import pandas as pd
-import warnings
 from auth_handler import get_password_hash, verify_password, create_access_token, decode_access_token
 from fastapi import FastAPI, Query, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,8 +19,8 @@ import asyncio
 import random
 from fastapi.security import OAuth2PasswordBearer
 from services.scheduler import start_scheduler
+from typing import List, Optional
 
-# Silenciar ruidos de versión de scikit-learn
 try:
     from sklearn.exceptions import InconsistentVersionWarning
     warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
@@ -69,41 +65,65 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 async def init_market_prices():
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AMD", "INTC", "BABA"]
-    for t in tickers:
-        info = get_stock_info(t)
-        if info and info.get("price"):
-            market_prices[t] = {
-                "price": info.get("price"),
-                "change": info.get("change") or 0.0
-            }
+    """Inicializa la lista de precios. Solo precarga unos pocos síncronamente
+    y deja el resto para el ciclo de actualización de fondo.
+    """
+    all_tickers = get_sp500_tickers()
+    # No cargamos 30 de forma secuencial, solo los 5 más populares para que el arranque sea rápido
+    initial_tickers = all_tickers[:5]
+    for t in initial_tickers:
+        try:
+            # Una carga mínima al inicio es aceptable
+            info = get_stock_info(t)
+            if info and info.get("price"):
+                market_prices[t] = {
+                    "price": info.get("price"),
+                    "change": info.get("change") or 0.0,
+                    "name": info.get("name", t),
+                    "volume": info.get("volume", 0)
+                }
+        except Exception:
+            pass
 
 async def send_market_updates():
+    """
+    Obtiene precios reales de yfinance y los transmite vía WebSocket.
+    Mantiene una cache local para reducir latencia y evitar bloqueos de yfinance.
+    Cicla a través de todo el S&P 500 progresivamente.
+    """
+    all_tickers = get_sp500_tickers()
+    idx = 0
     while True:
-        await asyncio.sleep(2)
-        if manager.active_connections and market_prices:
-            to_update = random.sample(list(market_prices.keys()), k=min(4, len(market_prices)))
-            updates = []
-            for t in to_update:
-                base = market_prices[t]
-                volatility = base["price"] * random.uniform(-0.002, 0.002)
-                new_price = round(base["price"] + volatility, 4)
-                new_change = round(base["change"] + random.uniform(-0.05, 0.05), 2)
+        await asyncio.sleep(5) # Aumentamos el intervalo para evitar rate limit de yfinance
+        if manager.active_connections:
+            # Seleccionamos el siguiente ticker de la lista global
+            t = all_tickers[idx % len(all_tickers)]
+            idx += 1
+            
+            info = get_stock_info(t)
+            
+            if info:
+                price = info["price"]
+                change = info["change"]
                 
-                market_prices[t]["price"] = new_price
-                market_prices[t]["change"] = new_change
+                market_prices[t] = {
+                    "price": price,
+                    "change": change,
+                    "name": info.get("name", t),
+                    "volume": info.get("volume", 0)
+                }
                 
-                updates.append({
+                update_msg = {
                     "ticker": t,
-                    "precio": new_price,
-                    "variacion": new_change,
-                    "color_green": new_change >= 0
-                })
-            
-            # Verificar órdenes límite cada tick de mercado
-            check_and_execute_orders(market_prices)
-            
-            await manager.broadcast({"type": "market_tick", "data": updates})
+                    "precio": price,
+                    "variacion": change,
+                    "color_green": (change or 0.0) >= 0
+                }
+                
+                # Verificar órdenes cada vez que un precio cambia
+                check_and_execute_orders(market_prices)
+                
+                await manager.broadcast({"type": "market_tick", "data": [update_msg]})
 
 @app.websocket("/ws/market")
 async def websocket_endpoint(websocket: WebSocket):
@@ -123,14 +143,17 @@ async def startup_event():
     asyncio.create_task(send_market_updates())
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
+    print(f"DEBUG: Token recibido: {token[:10]}...")
     payload = decode_access_token(token)
     if payload is None:
+        print("DEBUG: Payload es None")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido o expirado",
             headers={"WWW-Authenticate": "Bearer"},
         )
     email: str = payload.get("sub")
+    print(f"DEBUG: Email en token: {email}")
     if email is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -175,12 +198,21 @@ def recomendacion(ticker: str):
 
 
 @app.get("/predict/{ticker}")
-def predict_stock(ticker: str):
+def predict_stock(ticker: str, period: str = "1mo"):
     ticker_up = ticker.upper()
     try:
+        # Determinar intervalo basado en el periodo
+        # Aumentamos la resolución para periodos cortos para evitar crash por falta de puntos (RSI, etc)
+        if period == "1d":
+            interval = "15m"  # ~28 puntos (mercado abierto)
+        elif period == "5d":
+            interval = "60m"  # ~35 puntos
+        elif period == "15d":
+            interval = "60m"  # ~105 puntos
+        else:
+            interval = "1d"   # Cierre diario para periodos largos
+        
         # Intentamos obtener la recomendación inteligente
-        # Si el modelo no existe, smart_recommendation debería manejarlo,
-        # pero lo envolvemos por seguridad.
         try:
             ml_res = smart_recommendation(ticker_up, registrar=True, model_type="global_xgb")
         except Exception as e:
@@ -188,33 +220,45 @@ def predict_stock(ticker: str):
             ml_res = "Analizando..." # Valor por defecto si falla el .pkl
 
         info = get_stock_info(ticker_up)
-        history_df = get_price_history(ticker_up, period="30d", full=True)
+        # Obtenemos historial con el periodo e intervalo solicitados
+        history_df = get_price_history(ticker_up, period=period, interval=interval, full=True)
         
         # Procesamiento del historial OHLC
         history_list = []
         ohlc_list = []
         if history_df is not None and not history_df.empty:
-            if hasattr(history_df, "columns"):
-                if isinstance(history_df.columns, pd.MultiIndex):
-                    history_df.columns = history_df.columns.get_level_values(0)
-                
-                # Extraer OHLC list para candlesticks y history_list para líneas por si acaso
-                for index, row in history_df.iterrows():
-                    try:
-                        o = float(row.get("Open", row.get("open", 0)))
-                        h = float(row.get("High", row.get("high", 0)))
-                        l = float(row.get("Low", row.get("low", 0)))
-                        c = float(row.get("Close", row.get("close", 0)))
-                        v = float(row.get("Volume", row.get("volume", 0)))
-                        d = index.strftime("%Y-%m-%d") if hasattr(index, "strftime") else str(index)
-                        ohlc_list.append({"open": o, "high": h, "low": l, "close": c, "volume": v, "date": d})
-                        history_list.append(c)
-                    except Exception:
-                        pass
+            # Asegurar que las columnas sean simples (yfinance a veces devuelve MultiIndex)
+            if hasattr(history_df.columns, "levels"):
+                history_df.columns = history_df.columns.get_level_values(0)
+            
+            # Limpiar nombres de columnas para que sean consistentes
+            history_df.columns = [str(c).lower() for c in history_df.columns]
+            
+            for index, row in history_df.iterrows():
+                try:
+                    o = float(row.get("open", 0))
+                    h = float(row.get("high", 0))
+                    l = float(row.get("low", 0))
+                    c = float(row.get("close", 0))
+                    v = float(row.get("volume", 0))
+                    
+                    if str(o) == 'nan' or str(c) == 'nan':
+                        continue
+                        
+                    # Usamos formato ISO para incluir la hora si existe, asegurando unicidad
+                    d = index.isoformat() if hasattr(index, "isoformat") else str(index)
+                    ohlc_list.append({"open": o, "high": h, "low": l, "close": c, "volume": v, "date": d})
+                    history_list.append(c)
+                except Exception:
+                    pass
+
+        precio = info.get("price") if info else 0.0
+        if str(precio) == 'nan':
+            precio = 0.0
 
         return {
             "ticker": ticker_up,
-            "precio": info.get("price") if info else 0.0,
+            "precio": precio,
             "recomendacion": ml_res,
             "history": history_list,
             "ohlc": ohlc_list
@@ -286,35 +330,74 @@ def get_popular_stocks():
 
     
 @app.get("/market")
-def get_market_list():
-    import yfinance as yf
-    top_stocks = ["TSLA", "AMZN", "MSFT", "GOOGL", "META", "NFLX", "NVDA", "AMD", "INTC", "BABA"]
+def get_market_list(search: Optional[str] = None, page: int = 1, page_size: int = 50):
+    """Retorna la lista de acciones del mercado (S&P 500) con paginación."""
+    all_tickers = get_sp500_tickers()
+    
+    # Filtrado por búsqueda si se provee
+    if search:
+        search = search.upper()
+        filtered_tickers = [t for t in all_tickers if search in t]
+    else:
+        filtered_tickers = all_tickers
+        
+    total_items = len(filtered_tickers)
+    total_pages = (total_items + page_size - 1) // page_size
+    
+    # Asegurar que la página esté en rango
+    page = max(1, min(page, total_pages)) if total_pages > 0 else 1
+    
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    target_tickers = filtered_tickers[start_idx:end_idx]
     
     lista_market = []
     
-    for ticker in top_stocks:
-        info = get_stock_info(ticker)
-        if info:
-            market_cap = 0
-            try:
-                stock_yf = yf.Ticker(ticker)
-                inf = stock_yf.info
-                if inf and "marketCap" in inf:
-                    market_cap = inf["marketCap"]
-            except Exception:
-                pass
-                
+    for ticker in target_tickers:
+        # Intentamos obtener de la cache primero
+        if ticker in market_prices:
+            cached = market_prices[ticker]
             lista_market.append({
                 "ticker": ticker,
-                "nombre": info.get("name", ticker),
-                "precio": info.get("price"),
-                "variacion": info.get("change"),
-                "color_green": (info.get("change") or 0) >= 0,
-                "volumen": info.get("volume"),
-                "market_cap": market_cap
+                "nombre": cached.get("name", ticker),
+                "precio": cached.get("price"),
+                "variacion": cached.get("change"),
+                "color_green": (cached.get("change") or 0) >= 0,
+                "volumen": cached.get("volume"),
+                "market_cap": 0
             })
+        else:
+            # Si no está en cache pero es importante (como en búsqueda o primera página), 
+            # podríamos traerlo. Para paginación masiva, intentamos mostrar lo que hay o info mínima.
+            info = get_stock_info(ticker) if search or page == 1 else None
+            if info:
+                lista_market.append({
+                    "ticker": ticker,
+                    "nombre": info.get("name", ticker),
+                    "precio": info.get("price"),
+                    "variacion": info.get("change"),
+                    "color_green": (info.get("change") or 0) >= 0,
+                    "volumen": info.get("volume"),
+                    "market_cap": 0
+                })
+            else:
+                lista_market.append({
+                    "ticker": ticker,
+                    "nombre": ticker,
+                    "precio": 0.0,
+                    "variacion": 0.0,
+                    "color_green": True,
+                    "volumen": 0,
+                    "market_cap": 0
+                })
             
-    return lista_market
+    return {
+        "items": lista_market,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "current_page": page,
+        "page_size": page_size
+    }
 
 @app.get("/feedback")
 def save_user_decision(ticker: str, decision: str):
@@ -329,8 +412,6 @@ def save_user_decision(ticker: str, decision: str):
 
 from pydantic import BaseModel
 import hashlib
-
-from typing import Optional
 
 # --- MODELO DE USUARIO ---
 class User(BaseModel):
@@ -457,30 +538,46 @@ def get_watchlist(current_user: dict = Depends(get_current_user)):
     db_conn = get_db()
     user = db_conn.users.find_one({"email": current_user["email"]})
     watchlist = user.get("watchlist", [])
+    print(f"DEBUG: Watchlist cruda de BD para {current_user['email']}: {watchlist}")
     
     lista_watchlist = []
     for ticker in watchlist:
-        info = get_stock_info(ticker)
-        if info:
-            history_data = get_price_history(ticker, period="7d")
-            history_list = []
-            if history_data is not None and not history_data.empty:
-                if hasattr(history_data, "columns"):
-                    if isinstance(history_data.columns, pd.MultiIndex):
-                        history_data.columns = history_data.columns.get_level_values(0)
-                    if "Close" in history_data.columns:
-                        history_list = history_data["Close"].tolist()
-                else:
-                    history_list = history_data.tolist()
-            history_list = [x for x in history_list if str(x) != 'nan']
-            lista_watchlist.append({
-                "ticker": ticker,
-                "nombre": info.get("name", ticker),
-                "precio": info.get("price"),
-                "variacion": info.get("change"),
-                "color_green": (info.get("change") or 0) >= 0,
-                "history": history_list
-            })
+        try:
+            info = get_stock_info(ticker)
+            if info:
+                history_data = get_price_history(ticker, period="7d")
+                history_list = []
+                if history_data is not None and not history_data.empty:
+                    if hasattr(history_data, "columns"):
+                        if isinstance(history_data.columns, pd.MultiIndex):
+                            history_data.columns = history_data.columns.get_level_values(0)
+                        if "Close" in history_data.columns:
+                            history_list = history_data["Close"].tolist()
+                    else:
+                        history_list = history_data.tolist()
+                history_list = [x for x in history_list if str(x) != 'nan']
+                lista_watchlist.append({
+                    "ticker": ticker,
+                    "nombre": info.get("name", ticker),
+                    "precio": info.get("price") or 0.0,
+                    "variacion": info.get("change") or 0.0,
+                    "color_green": (info.get("change") or 0) >= 0,
+                    "history": history_list
+                })
+            else:
+                # Si yfinance falla, al menos mostramos el ticker
+                lista_watchlist.append({
+                    "ticker": ticker,
+                    "nombre": ticker,
+                    "precio": 0.0,
+                    "variacion": 0.0,
+                    "color_green": True,
+                    "history": []
+                })
+        except Exception as e:
+            print(f"DEBUG: Error procesando ticker {ticker}: {e}")
+            continue
+
     return {"status": "success", "watchlist": lista_watchlist}
 
 # --- RUTAS DE BILLETERA ---
@@ -579,15 +676,26 @@ def trade_sell(ticker: str, quantity: int, current_user: dict = Depends(get_curr
 
 # --- RUTAS DE ÓRDENES ---
 @app.post("/trade/order")
-def place_order(ticker: str, quantity: int, target_price: float, side: str, current_user: dict = Depends(get_current_user)):
+def place_order(ticker: str, quantity: int, target_price: float, side: str, order_type: str = "limit", current_user: dict = Depends(get_current_user)):
     if quantity <= 0 or target_price <= 0:
         return {"status": "error", "message": "Cantidad y precio deben ser mayores a 0"}
     
     if side not in ["buy", "sell"]:
         return {"status": "error", "message": "Side debe ser 'buy' o 'sell'"}
         
-    order_id = create_order(current_user["email"], ticker.upper(), quantity, target_price, side)
-    return {"status": "success", "message": f"Orden de {side} para {ticker} creada", "order_id": order_id}
+    if order_type not in ["limit", "stop_loss", "take_profit"]:
+        return {"status": "error", "message": "Tipo de orden no válido"}
+        
+    order_id = create_order(current_user["email"], ticker.upper(), quantity, target_price, side, order_type)
+    return {"status": "success", "message": f"Orden {order_type} de {side} para {ticker} creada", "order_id": order_id}
+
+@app.post("/wallet/transfer")
+def transfer_funds_endpoint(from_wallet: str, to_wallet: str, amount: float, current_user: dict = Depends(get_current_user)):
+    from services.wallet import transfer_between_subwallets
+    success, message = transfer_between_subwallets(current_user["email"], from_wallet, to_wallet, amount)
+    if success:
+        return {"status": "success", "message": message}
+    return {"status": "error", "message": message}
 
 @app.get("/user/orders")
 def get_user_orders(current_user: dict = Depends(get_current_user)):

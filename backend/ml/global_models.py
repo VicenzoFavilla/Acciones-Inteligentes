@@ -14,6 +14,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
+import warnings
+from sklearn.exceptions import ConvergenceWarning
 
 from ml.features import add_basic_features, make_supervised, get_X_y
 from config.alman_model import guardar_modelo_en_mongo
@@ -117,7 +119,7 @@ def train_or_update_mlp_global(tickers: List[str], period: str = "2y", model_pat
     if pipe is None:
         # Ajustamos batch_size inicial; fit lo sobreescribirá abajo si es necesario
         mlp = MLPClassifier(hidden_layer_sizes=(64, 32), activation="relu", solver="adam", alpha=1e-4,
-                            batch_size=min(128, len(X)), learning_rate_init=1e-3, max_iter=50, warm_start=True, random_state=42)
+                            batch_size="auto", learning_rate_init=1e-3, max_iter=50, warm_start=True, random_state=42)
         pipe = Pipeline([
             ("scaler", StandardScaler()),
             ("mlp", mlp),
@@ -129,7 +131,10 @@ def train_or_update_mlp_global(tickers: List[str], period: str = "2y", model_pat
             mlp.warm_start = True
             mlp.batch_size = min(128, len(X))
 
-    pipe.fit(X, y)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        warnings.simplefilter("ignore", UserWarning)
+        pipe.fit(X, y)
 
     os.makedirs("models", exist_ok=True)
     joblib.dump(pipe, model_path)
