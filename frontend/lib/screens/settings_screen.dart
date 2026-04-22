@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../main.dart'; // Para acceder a themeNotifier
+import '../main.dart'; // Para acceder a themeNotifier y AppState
+import 'package:provider/provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -48,6 +49,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _isDarkMode,
               activeColor: Colors.lightBlueAccent,
               onChanged: _toggleTheme,
+            ),
+          ),
+          _buildSettingTile(
+            icon: Icons.speed,
+            title: "Modo Pro",
+            subtitle: "Interfaz avanzada y gráficos TradingView",
+            trailing: Consumer<AppState>(
+              builder: (context, appState, child) => Switch(
+                value: appState.isProMode,
+                activeColor: Colors.orangeAccent,
+                onChanged: (val) => appState.toggleProMode(),
+              ),
             ),
           ),
           const SizedBox(height: 20),
