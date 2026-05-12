@@ -45,7 +45,7 @@ def _load_or_init_pipeline(model_path: str = "models/global_mlp.pkl") -> Pipelin
         activation="relu",
         solver="adam",
         alpha=1e-4,
-        batch_size=128,
+        batch_size="auto",
         learning_rate_init=1e-3,
         max_iter=30,
         warm_start=True,
@@ -110,15 +110,23 @@ def train_mlp_from_db_recent(limit: int = 500, model_path: str = "models/global_
         n = len(X)
         if hasattr(pipe, "named_steps") and "mlp" in pipe.named_steps:
             mlp = pipe.named_steps["mlp"]
-            mlp.batch_size = max(1, min(128, n))  # evitar clipping
+            # Evitar warnings de batch_size (clipping) y asegurar conjunto de validación
+            if n < 50:
+                mlp.early_stopping = False
+                mlp.batch_size = max(1, n // 2 if n > 1 else 1)
+            else:
+                mlp.early_stopping = True
+                mlp.batch_size = min(128, n)
+            
             # iteraciones en función del tamaño (mantenerlo rápido en la CLI)
             mlp.max_iter = 50 if n >= 500 else 30
     except Exception:
         pass
 
-    # Reducir ruido de convergencia en entrenamiento incremental
+    # Reducir ruido de convergencia y batch_size en entrenamiento incremental
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
+        warnings.simplefilter("ignore", UserWarning)
         pipe.fit(X, y)
 
     os.makedirs("models", exist_ok=True)

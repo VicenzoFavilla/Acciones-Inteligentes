@@ -1,11 +1,88 @@
-"""Servicios de datos bursátiles vía yfinance.
-
-Este módulo evita acoplar la UI: sólo retorna datos y persiste en DB.
-"""
-
 import yfinance as yf
-from datetime import datetime
+import urllib.request
+from html.parser import HTMLParser
+from datetime import datetime, timedelta
 from config.db import get_db
+
+# Cache para tickers del S&P 500
+_sp500_cache = {
+    "tickers": [],
+    "last_updated": None
+}
+
+class SP500Parser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_table = False
+        self.in_row = False
+        self.in_cell = False
+        self.cell_index = 0
+        self.tickers = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'table':
+            for attr in attrs:
+                if attr[0] == 'id' and attr[1] == 'constituents':
+                    self.in_table = True
+        
+        if self.in_table and tag == 'tr':
+            self.in_row = True
+            self.cell_index = 0
+        
+        if self.in_row and tag == 'td':
+            self.in_cell = True
+            self.cell_index += 1
+
+    def handle_data(self, data):
+        if self.in_cell and self.cell_index == 1:
+            ticker = data.strip()
+            # A veces el ticker está dentro de un link, el parser llamará a handle_data varias veces
+            # o el ticker puede estar ya en la lista si hubo un error de parsing previo.
+            if ticker and ticker not in self.tickers and len(ticker) < 10:
+                # Yahoo Finance usa '-' en lugar de '.' para tickers como BRK.B
+                ticker = ticker.replace('.', '-')
+                self.tickers.append(ticker)
+
+    def handle_endtag(self, tag):
+        if tag == 'table':
+            self.in_table = False
+        if tag == 'tr':
+            self.in_row = False
+        if tag == 'td':
+            self.in_cell = False
+
+
+def get_sp500_tickers():
+    """Obtiene la lista de tickers del S&P 500 desde Wikipedia con cache de 24h."""
+    global _sp500_cache
+    
+    # Si tenemos cache válida de menos de 24h, la usamos
+    if _sp500_cache["tickers"] and _sp500_cache["last_updated"]:
+        if datetime.now() - _sp500_cache["last_updated"] < timedelta(hours=24):
+            return _sp500_cache["tickers"]
+
+    try:
+        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        req = urllib.request.Request(url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html_content = response.read().decode('utf-8')
+
+        parser = SP500Parser()
+        parser.feed(html_content)
+        
+        if parser.tickers:
+            _sp500_cache["tickers"] = parser.tickers
+            _sp500_cache["last_updated"] = datetime.now()
+            return parser.tickers
+    except Exception as e:
+        print(f"Error fetching S&P 500 tickers: {e}")
+        
+    # Fallback si falla la descarga o no hay cache
+    return _sp500_cache["tickers"] if _sp500_cache["tickers"] else ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AMD", "INTC", "BABA"]
+
+
 
 
 def get_stock_info(ticker: str):
@@ -86,10 +163,10 @@ def get_stock_info(ticker: str):
     }
 
 
-def get_price_history(ticker: str, period: str = "30d", full=False):
-    """Devuelve la serie de cierres diarios u OHLC completo."""
+def get_price_history(ticker: str, period: str = "30d", interval: str = "1d", full=False):
+    """Devuelve la serie de cierres diarios u OHLC completo con intervalo personalizable."""
     stock = yf.Ticker(ticker)
-    hist = stock.history(period=period, interval="1d")
+    hist = stock.history(period=period, interval=interval)
     if hist is None or hist.empty:
         return None
     if full:
