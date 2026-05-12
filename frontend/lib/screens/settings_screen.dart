@@ -47,7 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: _isDarkMode ? "Activado" : "Desactivado",
             trailing: Switch(
               value: _isDarkMode,
-              activeColor: Colors.lightBlueAccent,
+              activeThumbColor: Colors.lightBlueAccent,
               onChanged: _toggleTheme,
             ),
           ),
@@ -58,7 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: Consumer<AppState>(
               builder: (context, appState, child) => Switch(
                 value: appState.isProMode,
-                activeColor: Colors.orangeAccent,
+                activeThumbColor: Colors.orangeAccent,
                 onChanged: (val) => appState.toggleProMode(),
               ),
             ),
@@ -71,7 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: "Recibir avisos de variaciones",
             trailing: Switch(
               value: _notificationsEnabled,
-              activeColor: Colors.lightBlueAccent,
+              activeThumbColor: Colors.lightBlueAccent,
               onChanged: (val) => setState(() => _notificationsEnabled = val),
             ),
           ),
