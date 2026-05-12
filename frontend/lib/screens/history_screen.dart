@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../config/api_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -33,7 +34,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     try {
       final response = await http.get(
-        Uri.parse('http://127.0.0.1:8001/wallet/history'),
+        ApiConfig.buildUri('/wallet/history'),
         headers: {'Authorization': 'Bearer $token'},
       );
 

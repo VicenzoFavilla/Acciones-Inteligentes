@@ -23,7 +23,8 @@ import asyncio
 import random
 from fastapi.security import OAuth2PasswordBearer
 from services.scheduler import start_scheduler
-
+from api.health import router as health_router
+from core.logger import logger
 # Silenciar ruidos de versión de scikit-learn
 try:
     from sklearn.exceptions import InconsistentVersionWarning
@@ -33,6 +34,7 @@ except ImportError:
 
 
 app = FastAPI()
+app.include_router(health_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -154,6 +156,58 @@ def read_root():
         }
 
 
+
+@app.post("/user/watchlist/{ticker}")
+def add_to_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    ticker_up = ticker.upper()
+    db_conn.users.update_one(
+        {"email": current_user["email"]},
+        {"$addToSet": {"watchlist": ticker_up}}
+    )
+    return {"status": "success", "message": f"{ticker_up} agregado a favoritos"}
+
+@app.delete("/user/watchlist/{ticker}")
+def remove_from_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    ticker_up = ticker.upper()
+    db_conn.users.update_one(
+        {"email": current_user["email"]},
+        {"$pull": {"watchlist": ticker_up}}
+    )
+    return {"status": "success", "message": f"{ticker_up} eliminado de favoritos"}
+
+@app.get("/user/watchlist")
+def get_watchlist(current_user: dict = Depends(get_current_user)):
+    db_conn = get_db()
+    user = db_conn.users.find_one({"email": current_user["email"]})
+    watchlist = user.get("watchlist", [])
+    
+    lista_watchlist = []
+    for ticker in watchlist:
+        info = get_stock_info(ticker)
+        if info:
+            history_data = get_price_history(ticker, period="7d")
+            history_list = []
+            if history_data is not None and not history_data.empty:
+                if hasattr(history_data, "columns"):
+                    if isinstance(history_data.columns, pd.MultiIndex):
+                        history_data.columns = history_data.columns.get_level_values(0)
+                    if "Close" in history_data.columns:
+                        history_list = history_data["Close"].tolist()
+                else:
+                    history_list = history_data.tolist()
+            history_list = [x for x in history_list if str(x) != 'nan']
+            lista_watchlist.append({
+                "ticker": ticker,
+                "nombre": info.get("name", ticker),
+                "precio": info.get("price"),
+                "variacion": info.get("change"),
+                "color_green": (info.get("change") or 0) >= 0,
+                "history": history_list
+            })
+    return {"status": "success", "watchlist": lista_watchlist}
+
 @app.get("/user/{email}")
 def get_user(email: str):
     db_conn = get_db()
@@ -184,7 +238,7 @@ def predict_stock(ticker: str):
         try:
             ml_res = smart_recommendation(ticker_up, registrar=True, model_type="global_xgb")
         except Exception as e:
-            print(f"IA Error: {e}")
+            logger.error(f"IA Error en predicción: {e}")
             ml_res = "Analizando..." # Valor por defecto si falla el .pkl
 
         info = get_stock_info(ticker_up)
@@ -220,7 +274,7 @@ def predict_stock(ticker: str):
             "ohlc": ohlc_list
         }
     except Exception as e:
-        print(f"Error general en predict: {e}")
+        logger.error(f"Error general en predict_stock para {ticker}: {e}")
         # Retornamos algo básico para que Flutter no dé 'Error de conexión'
         return {
             "ticker": ticker_up, 
@@ -431,57 +485,6 @@ def change_password(req: PasswordChange, current_user: dict = Depends(get_curren
     )
     
     return {"status": "success", "message": "Contraseña actualizada exitosamente"}
-
-@app.post("/user/watchlist/{ticker}")
-def add_to_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
-    db_conn = get_db()
-    ticker_up = ticker.upper()
-    db_conn.users.update_one(
-        {"email": current_user["email"]},
-        {"$addToSet": {"watchlist": ticker_up}}
-    )
-    return {"status": "success", "message": f"{ticker_up} agregado a favoritos"}
-
-@app.delete("/user/watchlist/{ticker}")
-def remove_from_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
-    db_conn = get_db()
-    ticker_up = ticker.upper()
-    db_conn.users.update_one(
-        {"email": current_user["email"]},
-        {"$pull": {"watchlist": ticker_up}}
-    )
-    return {"status": "success", "message": f"{ticker_up} eliminado de favoritos"}
-
-@app.get("/user/watchlist")
-def get_watchlist(current_user: dict = Depends(get_current_user)):
-    db_conn = get_db()
-    user = db_conn.users.find_one({"email": current_user["email"]})
-    watchlist = user.get("watchlist", [])
-    
-    lista_watchlist = []
-    for ticker in watchlist:
-        info = get_stock_info(ticker)
-        if info:
-            history_data = get_price_history(ticker, period="7d")
-            history_list = []
-            if history_data is not None and not history_data.empty:
-                if hasattr(history_data, "columns"):
-                    if isinstance(history_data.columns, pd.MultiIndex):
-                        history_data.columns = history_data.columns.get_level_values(0)
-                    if "Close" in history_data.columns:
-                        history_list = history_data["Close"].tolist()
-                else:
-                    history_list = history_data.tolist()
-            history_list = [x for x in history_list if str(x) != 'nan']
-            lista_watchlist.append({
-                "ticker": ticker,
-                "nombre": info.get("name", ticker),
-                "precio": info.get("price"),
-                "variacion": info.get("change"),
-                "color_green": (info.get("change") or 0) >= 0,
-                "history": history_list
-            })
-    return {"status": "success", "watchlist": lista_watchlist}
 
 # --- RUTAS DE BILLETERA ---
 @app.get("/wallet/info")

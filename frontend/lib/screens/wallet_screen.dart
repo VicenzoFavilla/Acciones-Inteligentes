@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../config/api_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -35,7 +36,7 @@ class _WalletScreenState extends State<WalletScreen> {
 
     try {
       final response = await http.get(
-        Uri.parse('http://127.0.0.1:8001/wallet/info'),
+        ApiConfig.buildUri('/wallet/info'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
@@ -59,7 +60,7 @@ class _WalletScreenState extends State<WalletScreen> {
   Future<void> _depositFunds(double amount) async {
     try {
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8001/wallet/deposit?amount=$amount'),
+        ApiConfig.buildUri('/wallet/deposit?amount=$amount'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
@@ -112,7 +113,7 @@ class _WalletScreenState extends State<WalletScreen> {
   Future<void> _sellStock(String ticker, int quantity) async {
     try {
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8001/trade/sell?ticker=$ticker&quantity=$quantity'),
+        ApiConfig.buildUri('/trade/sell?ticker=$ticker&quantity=$quantity'),
         headers: {'Authorization': 'Bearer $token'},
       );
 

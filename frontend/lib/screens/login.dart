@@ -3,7 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../main.dart'; // Import to access MainDashboard
+import 'dashboard_screen.dart';
+import '../config/api_config.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,7 +34,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final endpoint = _isLogin ? "login" : "register";
-      final url = Uri.parse('http://127.0.0.1:8001/$endpoint');
+      final url = ApiConfig.buildUri('/$endpoint');
       
       final response = await http.post(
         url,

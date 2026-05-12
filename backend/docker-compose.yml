@@ -3,7 +3,12 @@ services:
     image: mongo:latest
     container_name: mongo_db
     ports:
-      - "27017:27017"
+      - "27018:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-root}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-example}
+    volumes:
+      - mongodb_data:/data/db
     networks:
       - bolsa_net
 
@@ -12,9 +17,8 @@ services:
     container_name: python_backend
     ports:
       - "8001:8001"
-    environment:
-      # Asegúrate de que en tu código Python uses exactamente "MONGO_URL"
-      - MONGO_URL=mongodb://mongodb:27017/acciones_ml
+    env_file:
+      - .env
     depends_on:
       - mongodb
     networks:
@@ -22,3 +26,6 @@ services:
 
 networks:
   bolsa_net:
+
+volumes:
+  mongodb_data:

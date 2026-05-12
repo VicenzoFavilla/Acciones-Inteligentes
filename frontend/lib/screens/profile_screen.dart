@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../config/api_config.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -32,7 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      final response = await http.get(Uri.parse('http://127.0.0.1:8001/user/$email'));
+      final response = await http.get(ApiConfig.buildUri('/user/$email'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
@@ -54,7 +55,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     
     try {
       final response = await http.put(
-        Uri.parse('http://127.0.0.1:8001/user/update'),
+        ApiConfig.buildUri('/user/update'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -82,7 +83,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8001/user/change_password'),
+        ApiConfig.buildUri('/user/change_password'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

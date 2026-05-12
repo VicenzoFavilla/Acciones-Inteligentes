@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../main.dart'; // Para acceder a themeNotifier
+import '../core/theme_manager.dart'; // Para acceder a themeNotifier
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
