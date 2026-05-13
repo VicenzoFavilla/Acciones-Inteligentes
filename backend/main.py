@@ -22,6 +22,7 @@ from services.scheduler import start_scheduler
 from api.health import router as health_router
 from core.logger import logger
 from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor
 # Silenciar ruidos de versión de scikit-learn
 try:
     from sklearn.exceptions import InconsistentVersionWarning
@@ -408,11 +409,10 @@ def get_market_list(search: Optional[str] = None, page: int = 1, page_size: int 
     
     lista_market = []
     
-    for ticker in target_tickers:
-        # Intentamos obtener de la cache primero
+    def fetch_ticker_data(ticker):
         if ticker in market_prices:
             cached = market_prices[ticker]
-            lista_market.append({
+            return {
                 "ticker": ticker,
                 "nombre": cached.get("name", ticker),
                 "precio": cached.get("price"),
@@ -420,13 +420,11 @@ def get_market_list(search: Optional[str] = None, page: int = 1, page_size: int 
                 "color_green": (cached.get("change") or 0) >= 0,
                 "volumen": cached.get("volume"),
                 "market_cap": 0
-            })
+            }
         else:
-            # Si no está en cache pero es importante (como en búsqueda o primera página), 
-            # podríamos traerlo. Para paginación masiva, intentamos mostrar lo que hay o info mínima.
-            info = get_stock_info(ticker) if search or page == 1 else None
+            info = get_stock_info(ticker)
             if info:
-                lista_market.append({
+                return {
                     "ticker": ticker,
                     "nombre": info.get("name", ticker),
                     "precio": info.get("price"),
@@ -434,9 +432,9 @@ def get_market_list(search: Optional[str] = None, page: int = 1, page_size: int 
                     "color_green": (info.get("change") or 0) >= 0,
                     "volumen": info.get("volume"),
                     "market_cap": 0
-                })
+                }
             else:
-                lista_market.append({
+                return {
                     "ticker": ticker,
                     "nombre": ticker,
                     "precio": 0.0,
@@ -444,7 +442,10 @@ def get_market_list(search: Optional[str] = None, page: int = 1, page_size: int 
                     "color_green": True,
                     "volumen": 0,
                     "market_cap": 0
-                })
+                }
+                
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        lista_market = list(executor.map(fetch_ticker_data, target_tickers))
             
     return {
         "items": lista_market,
