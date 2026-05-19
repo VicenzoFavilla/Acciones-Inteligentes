@@ -19,6 +19,8 @@ services:
       - "8001:8001"
     env_file:
       - .env
+    environment:
+      - MONGO_URL=mongodb://root:example@mongodb:27017/acciones_ml?authSource=admin
     depends_on:
       - mongodb
     networks:
