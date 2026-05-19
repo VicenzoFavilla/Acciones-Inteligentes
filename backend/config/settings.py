@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = Field(default="development", description="Execution environment (development, staging, production)")
 
     # Model Configuration
-    MODEL_DIR: str = Field(default="models", description="Directory where .pkl models are stored")
+    MODEL_DIR: str = Field(default="../ml/models", description="Directory where .pkl models are stored")
 
     class Config:
         env_file = ".env"

@@ -12,8 +12,10 @@ from datetime import datetime
 import joblib
 import yfinance as yf
 import pandas as pd
+import os
 
 from config.db import get_db
+from config.settings import settings
 from config.alman_model import guardar_modelo_en_mongo, cargar_modelo_de_mongo
 from ml.trainer import train_buy_model_optimizado
 from ml.features import add_basic_features, make_supervised, get_X_y, FEATURE_COLUMNS
@@ -46,7 +48,8 @@ def _load_global_model(kind: str):
     if model is not None:
         return model
     try:
-        path = "models/global_xgb.pkl" if kind == "GLOBAL_XGB" else "models/global_mlp.pkl"
+        filename = "global_xgb.pkl" if kind == "GLOBAL_XGB" else "global_mlp.pkl"
+        path = os.path.join(settings.MODEL_DIR, filename)
         return joblib.load(path)
     except Exception:
         return None
@@ -111,11 +114,14 @@ def smart_recommendation(
     # Predicción (probabilidad si es posible)
     try:
         if hasattr(model, "predict_proba"):
+            # Extraer dinámicamente el umbral óptimo calibrado del modelo, o caer en el de defecto
+            thresh = getattr(model, "optimal_threshold", prob_threshold)
             prob = float(model.predict_proba(row_df)[:, 1][0])
-            pred = 1 if prob >= prob_threshold else 0
+            pred = 1 if prob >= thresh else 0
         else:
             pred = int(model.predict(row_df)[0])
             prob = None
+            thresh = prob_threshold
     except Exception as e:
         return f"Error al predecir: {e}"
 
@@ -134,7 +140,7 @@ def smart_recommendation(
             "features": feature_values,
             "decision_usuario": None,
             "modelo_usado": model_type,
-            "umbral": prob_threshold,
+            "umbral": thresh,
         })
 
         # entrenamiento incremental del MLP global a partir de la BD (pseudo-etiquetas si no hay y_true)

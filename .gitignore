@@ -8,6 +8,9 @@ services/__pycache__
 backend/models/
 ai/
 venv/
+.venv/
 .env
 .git/index.lock
 .git/index
+/ml/
+*.pkl

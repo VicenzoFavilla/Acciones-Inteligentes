@@ -23,10 +23,13 @@ import warnings
 
 from config.db import get_db
 from config.alman_model import guardar_modelo_en_mongo
+from config.settings import settings
 from ml.features import FEATURE_COLUMNS
 
 
-def _load_or_init_pipeline(model_path: str = "models/global_mlp.pkl") -> Pipeline:
+def _load_or_init_pipeline(model_path: str = None) -> Pipeline:
+    if model_path is None:
+        model_path = os.path.join(settings.MODEL_DIR, "global_mlp.pkl")
     if os.path.exists(model_path):
         try:
             pipe = joblib.load(model_path)
@@ -96,12 +99,14 @@ def _dataset_from_db(limit: int = 1000) -> Tuple[pd.DataFrame, np.ndarray]:
     return X, y
 
 
-def train_mlp_from_db_recent(limit: int = 500, model_path: str = "models/global_mlp.pkl"):
+def train_mlp_from_db_recent(limit: int = 500, model_path: str = None):
     """Entrena/actualiza el MLP global usando las últimas N muestras de la BD.
-
+    
     Usa y_true cuando está disponible; si no, usa y_pred como pseudo-etiqueta.
     Guarda en filesystem y en MongoDB bajo la clave GLOBAL_MLP.
     """
+    if model_path is None:
+        model_path = os.path.join(settings.MODEL_DIR, "global_mlp.pkl")
     X, y = _dataset_from_db(limit=limit)
     pipe = _load_or_init_pipeline(model_path)
 

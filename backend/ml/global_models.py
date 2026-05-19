@@ -7,12 +7,14 @@ se ejecuta mediante scripts/update_models.py.
 import os
 from typing import List, Tuple
 
+import numpy as np
 import joblib
 import yfinance as yf
 import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import f1_score
 from xgboost import XGBClassifier
 import warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -20,6 +22,7 @@ from sklearn.exceptions import ConvergenceWarning
 from ml.features import add_basic_features, make_supervised, get_X_y
 from config.alman_model import guardar_modelo_en_mongo
 from config.db import get_db
+from config.settings import settings
 
 
 def build_dataset_for_tickers(tickers: List[str], period: str = "2y") -> Tuple[pd.DataFrame, pd.Series]:
@@ -49,8 +52,10 @@ def build_dataset_for_tickers(tickers: List[str], period: str = "2y") -> Tuple[p
     return data, y
 
 
-def train_or_update_xgb_global(tickers: List[str], period: str = "2y", model_path: str = "models/global_xgb.pkl"):
-    """Entrena o continúa entrenando un XGBoost global, y lo guarda en FS+Mongo."""
+def train_or_update_xgb_global(tickers: List[str], period: str = "2y", model_path: str = None):
+    """Entrena o continúa entrenando un XGBoost global con regularización y calibración de umbral, y lo guarda en FS+Mongo."""
+    if model_path is None:
+        model_path = os.path.join(settings.MODEL_DIR, "global_xgb.pkl")
     X, y = build_dataset_for_tickers(tickers, period=period)
 
     # Split temporal simple
@@ -63,13 +68,17 @@ def train_or_update_xgb_global(tickers: List[str], period: str = "2y", model_pat
     neg = int((y_train == 0).sum())
     spw = max(1.0, neg / max(1, pos))
 
+    # Parámetros altamente regularizados para mitigar el sobreajuste
     params = dict(
         n_estimators=1000,
-        learning_rate=0.05,
-        max_depth=5,
+        learning_rate=0.03,        # Ritmo de aprendizaje menor
+        max_depth=4,                # Profundidad de árbol reducida
         subsample=0.8,
         colsample_bytree=0.8,
-        reg_lambda=1.0,
+        reg_alpha=0.1,              # Regularización L1
+        reg_lambda=3.0,             # Regularización L2
+        min_child_weight=3,
+        gamma=0.1,
         objective="binary:logistic",
         eval_metric="auc",
         scale_pos_weight=spw,
@@ -96,14 +105,35 @@ def train_or_update_xgb_global(tickers: List[str], period: str = "2y", model_pat
         xgb_model=prev_booster,
     )
 
+    # Calibración del umbral óptimo maximizando el F1-Score en el set de validación
+    best_thresh = 0.5
+    best_f1 = 0.0
+    try:
+        y_prob = xgb.predict_proba(X_val)[:, 1]
+        thresholds = np.arange(0.3, 0.7, 0.02)
+        for thresh in thresholds:
+            y_pred_thresh = (y_prob >= thresh).astype(int)
+            f1 = f1_score(y_val, y_pred_thresh, zero_division=0)
+            if f1 > best_f1:
+                best_f1 = f1
+                best_thresh = thresh
+    except Exception:
+        pass
+
+    # Almacenar dinámicamente el umbral óptimo dentro del propio objeto del modelo
+    xgb.optimal_threshold = float(best_thresh)
+    print(f"[INFO] Modelo XGBoost global entrenado. Umbral F1 Óptimo: {best_thresh:.2f} (F1: {best_f1:.3f})")
+
     os.makedirs("models", exist_ok=True)
     joblib.dump(xgb, model_path)
     guardar_modelo_en_mongo("GLOBAL_XGB", xgb)
     return xgb
 
 
-def train_or_update_mlp_global(tickers: List[str], period: str = "2y", model_path: str = "models/global_mlp.pkl"):
+def train_or_update_mlp_global(tickers: List[str], period: str = "2y", model_path: str = None):
     """Entrena o continúa entrenando un MLP global (pipeline con scaler)."""
+    if model_path is None:
+        model_path = os.path.join(settings.MODEL_DIR, "global_mlp.pkl")
     X, y = build_dataset_for_tickers(tickers, period=period)
 
     # pipeline con estandarización + MLP warm_start
