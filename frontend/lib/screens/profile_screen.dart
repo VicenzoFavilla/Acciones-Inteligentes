@@ -193,7 +193,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                    Container(
                     width: 120, height: 120,
                     decoration: BoxDecoration(
-                      color: Colors.blueAccent.withOpacity(0.1),
+                      color: Colors.blueAccent.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.person, size: 80, color: Colors.blueAccent),

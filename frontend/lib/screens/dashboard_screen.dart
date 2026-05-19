@@ -114,7 +114,12 @@ class _MainDashboardState extends State<MainDashboard> {
       if (response.statusCode == 200) {
         if (mounted) {
           setState(() {
-            marketList = (json.decode(response.body) as List).map((i) => StockModel.fromJson(i)).toList();
+            final data = json.decode(response.body);
+            if (data is Map && data.containsKey('items')) {
+              marketList = (data['items'] as List).map((i) => StockModel.fromJson(i)).toList();
+            } else if (data is List) {
+              marketList = data.map((i) => StockModel.fromJson(i)).toList();
+            }
             isLoadingMarket = false;
           });
         }
@@ -158,39 +163,56 @@ class _MainDashboardState extends State<MainDashboard> {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión'), backgroundColor: Colors.red));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión'), backgroundColor: Colors.red));
+      }
       return;
     }
 
+    ticker = ticker.toUpperCase();
     final isFav = watchlist.any((stock) => stock.ticker == ticker);
 
-    try {
-      // Optimistic update
-      setState(() {
-        if (isFav) {
-          watchlist.removeWhere((stock) => stock.ticker == ticker);
-        } else {
-          // Fake update optimistic (the list is reloaded anyway)
-          watchlist.add(StockModel(ticker: ticker, nombre: ticker, precio: 0.0, variacion: 0.0, colorGreen: true, volumen: 0.0, marketCap: 0.0, history: <double>[]));
-        }
-      });
-      
+    // Optimistic update: reflejamos el cambio en la UI inmediatamente
+    setState(() {
       if (isFav) {
-        await http.delete(
+        watchlist.removeWhere((stock) => stock.ticker == ticker);
+      } else {
+        watchlist.add(StockModel(
+          ticker: ticker, nombre: ticker, precio: 0.0,
+          variacion: 0.0, colorGreen: true, volumen: 0.0,
+          marketCap: 0.0, history: <double>[],
+        ));
+      }
+    });
+
+    try {
+      final http.Response response;
+      if (isFav) {
+        response = await http.delete(
           ApiConfig.buildUri('/user/watchlist/$ticker'),
           headers: {'Authorization': 'Bearer $token'},
         );
       } else {
-        await http.post(
+        response = await http.post(
           ApiConfig.buildUri('/user/watchlist/$ticker'),
           headers: {'Authorization': 'Bearer $token'},
         );
       }
-      _fetchWatchlist();
+
+      if (response.statusCode != 200) {
+        // Error del servidor: revertimos el update optimista
+        debugPrint('Error watchlist: ${response.statusCode} ${response.body}');
+        await _fetchWatchlist();
+      }
+      // Si fue exitoso, NO re-fetchiamos: la UI ya está correcta con el update optimista.
+      // El re-fetch es lento (llama a Yahoo Finance por ticker) y causaba el parpadeo.
     } catch (e) {
-      _fetchWatchlist(); // Revert on error
+      // Error de red: revertimos el update optimista
+      debugPrint('Error toggleWatchlist: $e');
+      await _fetchWatchlist();
     }
   }
+
 
   String _formatNumber(num? number) {
     if (number == null) return "0";
@@ -224,7 +246,7 @@ class _MainDashboardState extends State<MainDashboard> {
                 const SizedBox(height: 30),
                 _buildHeader(),
                 const SizedBox(height: 10),
-                Text("¿Qué acción analizamos hoy?", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7), fontSize: 16)),
+                Text("¿Qué acción analizamos hoy?", style: GoogleFonts.poppins(color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7), fontSize: 16)),
                 const SizedBox(height: 25),
                 _buildSearchBar(),
                 const SizedBox(height: 35),
@@ -294,7 +316,7 @@ class _MainDashboardState extends State<MainDashboard> {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(25),
-        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withOpacity(0.2) : Colors.grey.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withValues(alpha: 0.2) : Colors.grey.withValues(alpha: 0.2), blurRadius: 15, offset: const Offset(0, 8))],
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -326,7 +348,7 @@ class _MainDashboardState extends State<MainDashboard> {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(25),
-        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withOpacity(0.2) : Colors.grey.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withValues(alpha: 0.2) : Colors.grey.withValues(alpha: 0.2), blurRadius: 15, offset: const Offset(0, 8))],
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -471,7 +493,7 @@ class _MainDashboardState extends State<MainDashboard> {
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(25),
-          boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withOpacity(0.1) : Colors.grey.withOpacity(0.1), blurRadius: 15, offset: const Offset(0, 8))],
+          boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.black.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1), blurRadius: 15, offset: const Offset(0, 8))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -496,7 +518,7 @@ class _MainDashboardState extends State<MainDashboard> {
                           color: trendColor,
                           barWidth: 3,
                           dotData: FlDotData(show: false),
-                          belowBarData: BarAreaData(show: true, color: trendColor.withOpacity(0.1)),
+                          belowBarData: BarAreaData(show: true, color: trendColor.withValues(alpha: 0.1)),
                         ),
                       ],
                     ),
@@ -516,7 +538,7 @@ class _MainDashboardState extends State<MainDashboard> {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E1E),
         borderRadius: BorderRadius.circular(15),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10)],
       ),
       child: TextField(
         controller: _tickerController,

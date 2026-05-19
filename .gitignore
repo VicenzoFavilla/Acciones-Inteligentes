@@ -5,7 +5,7 @@ acciones_ML/
 ml/__pycache__
 
 services/__pycache__
-models/
+backend/models/
 ai/
 venv/
 .env
