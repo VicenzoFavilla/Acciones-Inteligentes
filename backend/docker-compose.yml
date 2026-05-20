@@ -21,6 +21,7 @@ services:
       - .env
     environment:
       - MONGO_URL=mongodb://root:example@mongodb:27017/acciones_ml?authSource=admin
+      - MODEL_DIR=ml/models
     depends_on:
       - mongodb
     networks:

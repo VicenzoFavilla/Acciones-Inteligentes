@@ -17,10 +17,15 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Create a non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Create a non-root user and their home directory
+RUN groupadd -r appuser && useradd -r -m -g appuser appuser
+
+# Set up caching directory with proper permissions
+RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser
 
 # Copy installed dependencies from builder
 COPY --from=builder /root/.local /home/appuser/.local
+RUN chown -R appuser:appuser /home/appuser/.local
 
 # Copy application code
 COPY . .
