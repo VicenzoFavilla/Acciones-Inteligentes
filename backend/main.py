@@ -19,7 +19,7 @@ app = FastAPI(title="Acciones Inteligentes API")
 
 # Middleware CORS
 # NOTA: allow_origins=["*"] es incompatible con allow_credentials=True (estándar HTTP).
-# Se listan los origenes del frontend de Flutter Web explicitamente.
+# Se listan los origenes explicitamente y se usa un regex para soportar cualquier puerto local (e.g. Flutter Web) y IPs locales.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -30,6 +30,7 @@ app.add_middleware(
         "http://127.0.0.1:8080",
         "http://127.0.0.1:5000",
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

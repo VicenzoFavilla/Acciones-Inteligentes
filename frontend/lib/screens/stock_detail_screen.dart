@@ -6,7 +6,7 @@ import 'package:candlesticks/candlesticks.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../config/api_config.dart';
-import '../core/app_state.dart';
+import '../providers/app_state.dart';
 import '../widgets/trading_view_chart.dart';
 import '../widgets/order_book.dart';
 import '../widgets/price_ticker.dart';

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme_manager.dart'; // Para acceder a themeNotifier
-import '../core/app_state.dart'; // Para acceder a AppState
+import '../providers/app_state.dart'; // Para acceder a AppState
 import 'package:provider/provider.dart';
 
 class SettingsScreen extends StatefulWidget {
