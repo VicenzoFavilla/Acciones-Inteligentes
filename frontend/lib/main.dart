@@ -9,7 +9,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'screens/login.dart';
 import 'screens/dashboard_screen.dart';
 import 'core/theme_manager.dart';
-import 'core/app_state.dart';
+import 'providers/app_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
