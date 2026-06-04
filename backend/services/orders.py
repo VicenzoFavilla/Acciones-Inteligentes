@@ -1,5 +1,5 @@
 from config.db import get_db
-from datetime import datetime
+from datetime import datetime, timezone
 from services.wallet import buy_stock, sell_stock
 
 def create_order(email: str, ticker: str, quantity: int, target_price: float, side: str, order_type: str = "limit"):
@@ -12,7 +12,7 @@ def create_order(email: str, ticker: str, quantity: int, target_price: float, si
         "side": side, # 'buy' or 'sell'
         "order_type": order_type, # 'limit', 'stop_loss', 'take_profit'
         "status": "pending",
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.now(timezone.utc)
     }
     result = db.orders.insert_one(order)
     return str(result.inserted_id)
@@ -66,11 +66,11 @@ def check_and_execute_orders(market_prices: dict):
                 if success:
                     db.orders.update_one(
                         {"_id": order["_id"]}, 
-                        {"$set": {"status": "executed", "executed_at": datetime.utcnow(), "execution_price": current_price}}
+                        {"$set": {"status": "executed", "executed_at": datetime.now(timezone.utc), "execution_price": current_price}}
                     )
                 else:
                     # Si falla por saldo/acciones, marcamos como cancelada o error
                     db.orders.update_one(
                         {"_id": order["_id"]}, 
-                        {"$set": {"status": "failed", "error": msg, "failed_at": datetime.utcnow()}}
+                        {"$set": {"status": "failed", "error": msg, "failed_at": datetime.now(timezone.utc)}}
                     )

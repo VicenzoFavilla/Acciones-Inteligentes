@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../config/api_config.dart';
 
 class AppState extends ChangeNotifier {
   bool _isProMode = false;
@@ -28,7 +29,7 @@ class AppState extends ChangeNotifier {
 
     try {
       final response = await http.get(
-        Uri.parse('http://127.0.0.1:8001/user/watchlist'),
+        ApiConfig.buildUri('/user/watchlist'),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (response.statusCode == 200) {
@@ -61,11 +62,11 @@ class AppState extends ChangeNotifier {
     try {
       final response = isFav
           ? await http.delete(
-              Uri.parse('http://127.0.0.1:8001/user/watchlist/$ticker'),
+              ApiConfig.buildUri('/user/watchlist/$ticker'),
               headers: {'Authorization': 'Bearer $token'},
             )
           : await http.post(
-              Uri.parse('http://127.0.0.1:8001/user/watchlist/$ticker'),
+              ApiConfig.buildUri('/user/watchlist/$ticker'),
               headers: {'Authorization': 'Bearer $token'},
             );
 

@@ -5,6 +5,10 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import os
 import sys
+import warnings
+
+# Silenciar advertencias de deprecación de terceros (httpx, jose, datetime) en la suite de pruebas
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Asegurar que el path incluya el backend
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -169,3 +173,40 @@ def test_websocket_market():
         # El websocket del server actual espera un mensaje para no cerrarse
         websocket.send_text("hello")
         assert True
+
+# ==========================================
+# 5. AUTH EMAIL NORMALIZATION TESTS
+# ==========================================
+
+def test_register_normalization(mock_db):
+    # Simular que el usuario no existe
+    mock_db.users.find_one.return_value = None
+    
+    response = client.post(
+        "/register",
+        json={"email": "   TEST_Normalizacion@acciones.com   ", "password": "mypassword"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    
+    # Verificar normalización en guardado
+    mock_db.users.insert_one.assert_called_once()
+    saved_user = mock_db.users.insert_one.call_args[0][0]
+    assert saved_user["email"] == "test_normalizacion@acciones.com"
+
+def test_login_normalization(mock_db):
+    from core.auth_handler import get_password_hash
+    # Simular usuario con email normalizado
+    mock_db.users.find_one.return_value = {
+        "email": "test_normalizacion@acciones.com",
+        "password": get_password_hash("mypassword")
+    }
+    
+    # Intento de login con capitalización mixta y espacios
+    response = client.post(
+        "/login",
+        json={"email": "  TEST_Normalizacion@acciones.com  ", "password": "mypassword"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["email"] == "test_normalizacion@acciones.com"

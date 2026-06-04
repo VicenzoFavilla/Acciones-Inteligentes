@@ -1,5 +1,5 @@
 from config.db import get_db
-from datetime import datetime
+from datetime import datetime, timezone
 
 def get_wallet(email: str):
     db = get_db()
@@ -14,7 +14,7 @@ def get_wallet(email: str):
                 "earn": {"balance": 0.0, "portfolio": {}}
             },
             "portfolio": {}, # {ticker: {"quantity": int, "average_price": float}}
-            "last_update": datetime.utcnow()
+            "last_update": datetime.now(timezone.utc)
         }
         db.wallets.insert_one(wallet)
     elif "sub_wallets" not in wallet:
@@ -52,7 +52,7 @@ def transfer_between_subwallets(email: str, from_wallet: str, to_wallet: str, am
                 f"sub_wallets.{from_wallet}.balance": -amount,
                 f"sub_wallets.{to_wallet}.balance": amount
             },
-            "$set": {"last_update": datetime.utcnow()}
+            "$set": {"last_update": datetime.now(timezone.utc)}
         }
     )
     return True, f"Transferencia de ${amount} desde {from_wallet} a {to_wallet} exitosa"
@@ -63,7 +63,7 @@ def update_balance(email: str, amount: float, wallet_type: str = "spot"):
         {"email": email},
         {
             "$inc": {f"sub_wallets.{wallet_type}.balance": amount},
-            "$set": {"last_update": datetime.utcnow()}
+            "$set": {"last_update": datetime.now(timezone.utc)}
         }
     )
     # También actualizamos el balance global por compatibilidad
@@ -86,7 +86,7 @@ def add_transaction(email: str, ticker: str, quantity: int, price: float, side: 
         "side": side,
         "total": quantity * price,
         "wallet_type": wallet_type,
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.now(timezone.utc)
     }
     db.transactions.insert_one(transaction)
     
@@ -117,7 +117,7 @@ def add_transaction(email: str, ticker: str, quantity: int, price: float, side: 
             "$set": {
                 f"sub_wallets.{wallet_type}.portfolio": portfolio,
                 "portfolio": portfolio, # Sincronizar con el global por ahora
-                "last_update": datetime.utcnow()
+                "last_update": datetime.now(timezone.utc)
             }
         }
     )
