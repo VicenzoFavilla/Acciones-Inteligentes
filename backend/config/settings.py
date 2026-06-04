@@ -2,8 +2,10 @@ from pydantic import BaseSettings, Field
 
 class Settings(BaseSettings):
     # MongoDB Configuration
-    MONGO_URL: str = Field(default="mongodb://mongodb:27017/acciones_ml", description="MongoDB Connection URL")
+    # CAMBIA ESTA LÍNEA: de 'mongodb' a 'localhost' o '127.0.0.1'
+    MONGO_URL: str = Field(default="mongodb://localhost:27017/acciones_ml", description="MongoDB Connection URL")
     MONGO_INITDB_ROOT_USERNAME: str = Field(default="root", description="MongoDB Root Username")
+    # ... el resto de tu código sigue igual
     MONGO_INITDB_ROOT_PASSWORD: str = Field(default="example", description="MongoDB Root Password")
 
     # API Configuration
