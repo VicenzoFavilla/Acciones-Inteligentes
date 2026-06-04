@@ -54,10 +54,11 @@ async def read_users_me(current_user: dict = Depends(get_current_user)):
 @router.post("/register")
 def register(user: User):
     db_conn = get_db()
-    if db_conn.users.find_one({"email": user.email}):
+    email_lower = user.email.strip().lower()
+    if db_conn.users.find_one({"email": email_lower}):
         return {"status": "error", "message": "El usuario ya existe"}
     new_user = {
-        "email": user.email,
+        "email": email_lower,
         "password": get_password_hash(user.password),
         "name": user.name or ""
     }
@@ -67,17 +68,18 @@ def register(user: User):
 @router.post("/login")
 def login(user: User):
     db_conn = get_db()
-    existing_user = db_conn.users.find_one({"email": user.email})
+    email_lower = user.email.strip().lower()
+    existing_user = db_conn.users.find_one({"email": email_lower})
     if not existing_user:
         return {"status": "error", "message": "Credenciales inválidas"}
     if verify_password(user.password, existing_user["password"]):
-        access_token = create_access_token(data={"sub": user.email})
+        access_token = create_access_token(data={"sub": email_lower})
         return {
             "status": "success", 
             "message": "Login exitoso", 
             "access_token": access_token,
             "token_type": "bearer",
-            "email": user.email,
+            "email": email_lower,
             "name": existing_user.get("name", "")
         }
     return {"status": "error", "message": "Credenciales inválidas"}
@@ -107,7 +109,8 @@ def change_password(req: PasswordChange, current_user: dict = Depends(get_curren
 @router.get("/user/{email}")
 def get_user(email: str):
     db_conn = get_db()
-    user = db_conn.users.find_one({"email": email})
+    email_lower = email.strip().lower()
+    user = db_conn.users.find_one({"email": email_lower})
     if user:
         return {"status": "success", "user": user}
     else:
