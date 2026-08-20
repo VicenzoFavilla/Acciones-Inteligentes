@@ -1,111 +1,192 @@
-# 📈 Acciones Inteligentes - Asesor Financiero con ML
+# 📈 Acciones Inteligentes - Plataforma de Asesoramiento Financiero y Agentes de IA Autónomos
 
-**Acciones Inteligentes** es una plataforma moderna de asesoramiento financiero que combina el análisis de datos en tiempo real de Yahoo Finance con técnicas avanzadas de Machine Learning (XGBoost) para ofrecer recomendaciones de inversión personalizadas.
+**Acciones Inteligentes** evoluciona de un sistema puramente cuantitativo basado en modelos de Machine Learning (XGBoost) hacia una **arquitectura híbrida orientada a Agentes Financieros Autónomos** impulsados por Large Language Models (**Google GenAI / Gemini 2.5 Flash**).
 
-La aplicación cuenta con un ecosistema completo: un backend robusto en **FastAPI** y una aplicación móvil/escritorio intuitiva desarrollada en **Flutter**.
-
----
-
-## 🎨 Características Principales
-
-### 🌓 Interfaz Dinámica (Modo Claro/Oscuro)
-- Sistema de temas global y persistente.
-*   Diseño "Premium" con acentos en azul celeste y animaciones sutiles.
-*   Elegible desde la pestaña de Configuración.
-
-### 💰 Billetera y Portafolio Virtual
-*   Gestión de saldo virtual para simular inversiones sin riesgo.
-*   Cálculo automático de **P&L (Ganancias y Pérdidas)** por activo y total del patrimonio.
-*   Historial detallado de todas las operaciones realizadas.
-
-### 🤖 Inteligencia Artificial y Datos
-- **Modelo XGBoost Optimizado:** Implementación avanzada y regularizada para mitigar el sobreajuste (overfitting) en datos de mercado ruidosos.
-- **Ingeniería de Variables Avanzada (19 Indicadores Técnicos):** Cálculo nativo y vectorizado en Pandas/Numpy de:
-  - *Tendencia:* EMA 5, EMA 20.
-  - *Momentum:* RSI (14), MACD & Histograma MACD (12, 26, 9), ROC (10).
-  - *Volatilidad y Canales:* Bandas de Bollinger (20, 2) (distancias superior/inferior, ancho de banda), ATR Normalizado porcentual (`ATR_Pct`).
-  - *Osciladores:* Estocástico rápido/lento (`%K`, `%D`).
-  - *Retorno y Volatilidad:* Retornos porcentuales diarios y desviación estándar de corto plazo.
-- **Calibración Dinámica de Umbral (F1-Score):** Búsqueda dinámica del umbral de decisión óptimo en el set de validación para maximizar el F1-Score (balance ideal de Precisión y Exhaustividad) en lugar de usar un umbral rígido del 50%.
-- **Gráficos Financieros Interactivos:** Velas japonesas (**Candlesticks**) e históricos de precios detallados.
-- **Simulación en Tiempo Real:** Transmisión de datos y recomendaciones actualizadas vía **WebSockets**.
-- **Documentación Especializada:** Para conocer los detalles matemáticos de los indicadores, regularizaciones e hiperparámetros, consulta la [Documentación del Motor de ML](file:///c:/proyectos/acciones_inteligentes/Machine-learning/backend/ml/README.md).
-
-### 🔐 Seguridad y Autenticación
-- Sistema de usuarios con contraseñas hasheadas (**Bcrypt**).
-- Protección de endpoints mediante tokens **JWT (JSON Web Tokens)**.
+El ecosistema integra análisis de datos en tiempo real de Yahoo Finance, modelos predictivos de Machine Learning, extracción contextual de noticias financieras, control dinámico de riesgo de cartera, ejecución en Paper Trading con supervisión **Human-in-the-Loop (HITL)** y un backend moderno en **FastAPI** junto con un cliente interactivo en **Flutter**.
 
 ---
 
-## 🛠️ Stack Tecnológico
+## 🏛️ 1. Visión General de la Arquitectura
 
-**Frontend:**
-*   [Flutter](https://flutter.dev/) (UI Framework)
-*   [Google Fonts](https://fonts.google.com/) (Tipografía Poppins)
-*   [FL Chart](https://pub.dev/packages/fl_chart) (Gráficos financieros)
-*   [SharedPreferences](https://pub.dev/packages/shared_preferences) (Persistencia de configuración)
+La arquitectura híbrida combina la precisión estadística de XGBoost con la capacidad contextual, de razonamiento y de ejecución de Gemini estructurado como agente financiero senior:
 
-**Backend:**
-*   [Python / FastAPI](https://fastapi.tiangolo.com/) (Web Framework)
-*   [MongoDB](https://www.mongodb.com/) (Base de datos NoSQL)
-*   [YFinance](https://github.com/ranaroussi/yfinance) (Datos de mercado reales)
-*   [Scikit-learn / XGBoost](https://xgboost.readthedocs.io/) (Cerebro de ML)
+| Componente | Tecnología / Herramienta | Responsabilidad Principal |
+| :--- | :--- | :--- |
+| **Capa Cuantitativa** | Python / XGBoost / Pandas | Generación de predicciones técnicas, cálculo de probabilidades ($P(\text{BUY})$) y señales cuantitativas (`BUY`, `SELL`, `HOLD`). |
+| **Capa Contextual** | Yahoo Finance News / Web Scraping | Captura de noticias del mercado, informes financieros y contexto cualitativo en tiempo real (últimas 24-48h). |
+| **Orquestador (Agente)** | Google GenAI SDK (`google-genai`) / Gemini 2.5 Flash | Sintetizar señales ML con contexto cualitativo, aplicar reglas de gestión de riesgo y tomar decisiones fundamentadas. |
+| **Ejecución & Gestión** | Broker API / Portfolio Manager / MongoDB | Validación de saldo disponible, límites de asignación de capital (máx. 10%), simulación Paper Trading y Human-in-the-Loop. |
 
 ---
 
-## 📂 Estructura del Proyecto
+## 🛠️ 2. Especificación Detallada de Herramientas (Tools)
+
+Las herramientas son funciones nativas de Python que el agente invoca dinámicamente mediante **Function Calling**:
+
+### 2.1. `get_ml_signal(ticker: str) -> dict`
+* **Propósito:** Inferencia cuantitativa utilizando el modelo XGBoost precargado y calibrado con 19 indicadores técnicos (RSI, MACD, Medias Móviles, Bandas de Bollinger, ATR, Estocástico).
+* **Mapeo de Señal:**
+  * Probabilidad $> 0.65 \longrightarrow \text{"BUY"}$
+  * Probabilidad $< 0.35 \longrightarrow \text{"SELL"}$
+  * $0.35 \le \text{Probabilidad} \le 0.65 \longrightarrow \text{"HOLD"}$
+* **Retorno:** `{"ticker": "NVDA", "signal": "BUY", "confidence": 0.8250}`
+* **Pros:** Base matemática objetiva libre de sesgo conversacional; respuesta ultra rápida e integración directa.
+* **Contras:** Requiere reentrenamiento periódico para evitar degradación de régimen; no contempla noticias de último momento de forma nativa.
+
+### 2.2. `get_market_news(ticker: str, limit: int = 5) -> list[dict]`
+* **Propósito:** Recupera titulares, resúmenes, fuentes y marcas temporales de noticias recientes sobre el activo para evaluar el sentimiento del mercado y detectar riesgos no capturados.
+* **Retorno:** Lista de objetos con `title`, `summary`, `source`, `time_published`.
+* **Pros:** Cubre el punto ciego cualitativo del modelo numérico ante eventos imprevistos; aporta explicabilidad humana al dictamen.
+* **Contras:** Sujeto a límites de cuota (rate limits); requiere filtrado para descartar ruido o titulares clickbait.
+
+### 2.3. `get_portfolio_status(email: str) -> dict`
+* **Propósito:** Proporciona visibilidad en tiempo real sobre el balance de efectivo (`cash_balance`), valuación de mercado total (`total_portfolio_value`) y desglose de posiciones abiertas con su PnL.
+* **Retorno:** `{"cash_balance": 10000.0, "total_portfolio_value": 11800.0, "positions": [...]}`
+* **Pros:** Permite al agente aplicar límites de capital y diversificación inteligente; previene órdenes técnicamente válidas pero financieramente inviables.
+* **Contras:** Requiere sincronización constante y consistencia con las transacciones del usuario.
+
+### 2.4. `place_trade_order(ticker: str, action: str, percentage_capital: float, email: str) -> dict`
+* **Propósito:** Simula o registra órdenes de compra/venta respetando las políticas de riesgo aprobadas.
+* **Regla de Riesgo:** Rechaza automáticamente cualquier operación que intente comprometer **más del 10% del capital total**.
+* **Retorno:** `{"transaction_id": "...", "ticker": "AAPL", "action": "BUY", "quantity": 5, "status": "pending_approval"}`
+* **Pros:** Automatización end-to-end desde el análisis hasta la generación de órdenes; reduce la latencia de ejecución.
+* **Contras:** Requiere manejo robusto de excepciones y control estricto de Human-in-the-Loop.
+
+---
+
+## 🤖 3. Grafo de Decisión del Agente y System Prompt
+
+El agente opera bajo un bucle de control iterativo (*Agent Loop*) gobernado por las siguientes **5 Reglas de Operación**:
+
+```text
+1. Siempre consulta la señal cuantitativa mediante 'get_ml_signal'.
+2. Si la señal es BUY o SELL, consulta noticias con 'get_market_news' para verificar si hay riesgos no capturados.
+3. Antes de ejecutar o recomendar una orden, revisa el portafolio con 'get_portfolio_status'.
+4. NUNCA asignes más del 10% del valor total del portafolio a una sola operación.
+5. Justifica claramente cada decisión con datos cuantitativos y cualitativos.
+```
+
+### Diagrama de Flujo del Grafo de Decisión
+
+```
+[Usuario / Consulta] ──> [Gemini 2.5 Flash Orchestrator]
+                               │
+            ┌──────────────────┴──────────────────┐
+            ▼                                     ▼
+   [get_ml_signal]                       [get_market_news]
+ (Inferencia XGBoost)                  (Noticias de Mercado)
+            │                                     │
+            └──────────────────┬──────────────────┘
+                               ▼
+                    [get_portfolio_status]
+                   (Validación de Cartera)
+                               │
+                               ▼
+                    [place_trade_order]
+                 (Validación Regla <= 10%)
+                               │
+                               ▼
+                 [Human-in-the-Loop: Pendiente]
+                               │
+                               ▼
+                   [Dictamen Final Explicable]
+```
+
+---
+
+## 🔒 4. Aislamiento, Auditoría y Human-in-the-Loop
+
+1. **Lazy Loading de Modelos XGBoost (`ml_loader.py`):** Los modelos entrenados y los clasificadores globales se cargan en un singleton en memoria (`ModelCache`), eliminando la sobrecarga de I/O en cada consulta del agente.
+2. **Human-in-the-Loop (HITL):** Las órdenes sugeridas se crean en estado `pending_approval`. El usuario puede revisar la justificación y autorizar (`POST /agent/orders/{id}/approve`) o rechazar (`POST /agent/orders/{id}/reject`) la transacción.
+3. **Auditoría y Trazas (`agent_traces`):** Cada ejecución del agente almacena en MongoDB la traza completa de herramientas invocadas, argumentos, salidas y razonamiento generado para auditorías de cumplimiento y depuración.
+
+---
+
+## 🌐 5. Endpoints de la API del Agente
+
+* `POST /agent/analyze` - Ejecuta el análisis agéntico completo para un ticker (ej. `{"ticker": "NVDA"}`).
+* `GET /agent/traces` - Consulta el historial de trazas y decisiones del agente para auditoría.
+* `POST /agent/orders/{order_id}/approve` - Aprueba y ejecuta en la cartera una orden sugerida por la IA.
+* `POST /agent/orders/{order_id}/reject` - Descarta una orden generada por el agente.
+* `GET /agent/info` - Retorna las capacidades, herramientas y reglas del sistema del Agente Financiero.
+
+---
+
+## 📂 6. Estructura del Proyecto
 
 ```text
 Acciones-Inteligentes/
-├── frontend/               # Código fuente de Flutter
-│   ├── lib/
-│   │   ├── screens/        # Pantallas (Login, Wallet, History, Settings)
-│   │   └── main.dart       # Lógica central y navegación
-├── backend/                # API en Python FastAPI
-│   ├── config/             # Singleton de bases de datos
-│   ├── ml/                 # Modelos XGBoost y lógica de recomendación
-│   ├── services/           # Integración con Yahoo Finance y Wallet
-│   ├── test/               # Suite de pruebas automatizadas
-│   └── main.py             # Entrypoint de la API
-└── requirements.txt        # Dependencias de Python
+├── src/
+│   └── agent/                     # Módulo del Agente (Tools, Orchestrator, ML Loader)
+│       ├── __init__.py
+│       ├── tools.py               # Las 4 herramientas nativas
+│       ├── orchestrator.py        # Grafo de decisión y bucle GenAI
+│       └── ml_loader.py           # Lazy loading de XGBoost
+├── backend/
+│   ├── agent/                     # Paquete del agente integrado en el backend
+│   │   ├── tools.py
+│   │   ├── orchestrator.py
+│   │   └── ml_loader.py
+│   ├── api/
+│   │   ├── agent.py               # Endpoints REST del agente y HITL
+│   │   ├── auth.py, health.py, stocks.py, trading.py, wallet.py, websocket.py
+│   ├── config/                    # Base de datos y variables de entorno (Settings)
+│   ├── ml/                        # Motores XGBoost, features y entrenamiento
+│   ├── services/                  # Wallet, órdenes y Yahoo Finance
+│   ├── test/                      # Tests unitarios del agente y de la API
+│   ├── tests_consolidated.py      # Suite de pruebas consolidada (29 tests)
+│   └── main.py                    # Entrypoint de FastAPI
+├── requirements.txt               # Dependencias Python
+└── README.md                      # Documentación técnica completa
 ```
 
 ---
 
-## 🚀 Instalación y Configuración
+## 🚀 7. Instalación y Configuración
 
 ### 1. Requisitos Previos
-*   Instalar [Python 3.10+](https://www.python.org/)
-*   Instalar [Flutter SDK](https://docs.flutter.dev/get-started/install)
-*   Tener una instancia de [MongoDB](https://www.mongodb.com/try/download/community) corriendo localmente.
+* Python 3.10+ (Recomendado **Python 3.12**)
+* Flutter SDK (para la aplicación móvil/escritorio)
+* MongoDB en ejecución local o remota.
 
-### 2. Configurar el Backend
+### 2. Configurar el Backend y API Key
+```bash
+# 1. Crear y activar entorno virtual
+python -m venv entorno-v
+.\entorno-v\Scripts\activate       # Windows
+# source entorno-v/bin/activate    # Linux / macOS
+
+# 2. Instalar dependencias
+pip install -r requirements.txt
+
+# 3. Configurar API Key de Gemini en .env o entorno
+# GEMINI_API_KEY=tu_api_key_aqui
+```
+
+### 3. Iniciar el Servidor FastAPI
 ```bash
 cd backend
-python -m venv venv
-# Activar venv (Windows: .\venv\Scripts\activate | Unix: source venv/bin/activate)
-pip install -r ../requirements.txt
 uvicorn main:app --reload --port 8001
 ```
 
-### 3. Configurar el Frontend
-```bash
-cd frontend
-flutter pub get
-flutter run
-```
-
 ---
 
-## 🧪 Pruebas Automatizadas
+## 🧪 8. Pruebas Automatizadas
 
-Hemos consolidado y unificado la suite de pruebas automatizadas del backend para asegurar la máxima estabilidad en todas las capas (Autenticación, Motor de Órdenes, Billeteras Virtuales, API y el Motor de Machine Learning).
+La suite de pruebas unificada y consolidada valida todas las capas del sistema (Autenticación, Billeteras, Órdenes, Machine Learning, Tools del Agente, Grafo de Decisión y endpoints REST).
 
-Para ejecutar la suite de pruebas consolidada:
+Para ejecutar la suite completa:
 
 ```bash
 cd backend
-python -m pytest tests_consolidated.py
+pytest tests_consolidated.py -v
+```
+
+Para ejecutar los tests específicos del Agente Financiero:
+
+```bash
+cd backend
+pytest test/test_agent_tools.py test/test_agent_orchestrator.py test/test_agent_api.py -v
 ```
 
 ---

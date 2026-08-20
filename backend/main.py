@@ -14,6 +14,7 @@ from api.stocks import router as stocks_router
 from api.wallet import router as wallet_router
 from api.trading import router as trading_router
 from api.websocket import router as ws_router, init_market_prices, send_market_updates
+from api.agent import router as agent_router
 
 app = FastAPI(title="Acciones Inteligentes API")
 
@@ -39,6 +40,7 @@ app.include_router(stocks_router, tags=["Stocks"])
 app.include_router(wallet_router, tags=["Wallet"])
 app.include_router(trading_router, tags=["Trading"])
 app.include_router(ws_router, tags=["WebSocket"])
+app.include_router(agent_router, tags=["AI Agent"])
 
 @app.on_event("startup")
 async def startup_event():
@@ -57,4 +59,5 @@ def read_root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+

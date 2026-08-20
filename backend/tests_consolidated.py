@@ -40,8 +40,11 @@ def mock_db():
          patch("api.stocks.get_db") as mock_stocks_db, \
          patch("api.wallet.get_db") as mock_wallet_db, \
          patch("api.trading.get_db") as mock_trading_db, \
+         patch("api.agent.get_db") as mock_agent_db, \
          patch("services.orders.get_db") as mock_orders_db, \
-         patch("services.wallet.get_db") as mock_wallet_service_db:
+         patch("services.wallet.get_db") as mock_wallet_service_db, \
+         patch("agent.tools.get_db") as mock_tools_db, \
+         patch("agent.orchestrator.get_db") as mock_orch_db:
         
         db = MagicMock()
         mock_deps_db.return_value = db
@@ -49,8 +52,12 @@ def mock_db():
         mock_stocks_db.return_value = db
         mock_wallet_db.return_value = db
         mock_trading_db.return_value = db
+        mock_agent_db.return_value = db
         mock_orders_db.return_value = db
         mock_wallet_service_db.return_value = db
+        mock_tools_db.return_value = db
+        mock_orch_db.return_value = db
+
         
         # Para get_current_user (en api.deps)
         db.users.find_one.return_value = {"email": "test@example.com", "name": "Test User", "password": "hashed_password"}
@@ -210,3 +217,94 @@ def test_login_normalization(mock_db):
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert response.json()["email"] == "test_normalizacion@acciones.com"
+
+
+# ==========================================
+# 6. AUTONOMOUS FINANCIAL AGENT (XGBoost + Gemini + Tools + Risk)
+# ==========================================
+
+def test_agent_tools_ml_signal():
+    from agent.tools import get_ml_signal
+    mock_model = MagicMock()
+    mock_model.predict_proba.return_value = np.array([[0.10, 0.90]])
+    mock_feat = pd.DataFrame([{"col1": 1.0}])
+
+    with patch("agent.tools.get_or_load_xgboost_model", return_value=mock_model), \
+         patch("agent.tools.extract_technical_features", return_value=mock_feat):
+        res = get_ml_signal("NVDA")
+        assert res["ticker"] == "NVDA"
+        assert res["signal"] == "BUY"
+        assert res["confidence"] == 0.9000
+
+
+def test_agent_tools_portfolio_risk_limit():
+    from agent.tools import place_trade_order
+    # Intentar asignar 15% (debe rechazarse por superar el límite del 10%)
+    res = place_trade_order("NVDA", "BUY", 0.15, email="test@example.com")
+    assert res["status"] == "rejected"
+    assert "Límite de riesgo excedido" in res["error"]
+
+
+def test_agent_orchestrator_decision_loop(mock_db):
+    from agent.orchestrator import run_financial_agent
+    mock_client = MagicMock()
+    mock_chat = MagicMock()
+    mock_client.chats.create.return_value = mock_chat
+
+    call_tool = MagicMock()
+    call_tool.name = "get_ml_signal"
+    call_tool.args = {"ticker": "AAPL"}
+
+    resp1 = MagicMock()
+    resp1.function_calls = [call_tool]
+    resp1.text = None
+
+    resp2 = MagicMock()
+    resp2.function_calls = []
+    resp2.text = "Dictamen Final: Mantener posición (HOLD)."
+
+    mock_chat.send_message.side_effect = [resp1, resp2]
+    mock_db.agent_traces.insert_one.return_value.inserted_id = "trace_consolidated_1"
+
+    with patch("agent.tools.get_or_load_xgboost_model") as mock_m, \
+         patch("agent.tools.extract_technical_features") as mock_f:
+        mock_model_obj = MagicMock()
+        mock_model_obj.predict_proba.return_value = [[0.5, 0.5]]
+        mock_m.return_value = mock_model_obj
+        mock_f.return_value = MagicMock()
+
+        result = run_financial_agent("AAPL", user_email="test@example.com", client=mock_client)
+        assert result["ticker"] == "AAPL"
+        assert "Dictamen Final" in result["final_verdict"]
+        assert len(result["tool_calls"]) == 1
+
+
+def test_agent_endpoints_flow(auth_headers, mock_db):
+    from bson import ObjectId
+    # 1. Info
+    resp_info = client.get("/agent/info")
+    assert resp_info.status_code == 200
+    assert "get_ml_signal" in resp_info.json()["available_tools"]
+
+    # 2. Analyze
+    with patch("api.agent.run_financial_agent", return_value={"trace_id": "t1", "ticker": "TSLA", "final_verdict": "BUY"}):
+        resp_an = client.post("/agent/analyze", json={"ticker": "TSLA"}, headers=auth_headers)
+        assert resp_an.status_code == 200
+        assert resp_an.json()["data"]["ticker"] == "TSLA"
+
+    # 3. Approve HITL
+    oid = ObjectId()
+    mock_db.orders.find_one.return_value = {
+        "_id": oid,
+        "email": "test@example.com",
+        "ticker": "TSLA",
+        "action": "BUY",
+        "quantity": 2,
+        "estimated_price": 200.0,
+        "status": "pending_approval"
+    }
+    with patch("api.agent.buy_stock", return_value=(True, "Compra aprobada")):
+        resp_app = client.post(f"/agent/orders/{str(oid)}/approve", json={"notes": "OK"}, headers=auth_headers)
+        assert resp_app.status_code == 200
+        assert resp_app.json()["status"] == "success"
+

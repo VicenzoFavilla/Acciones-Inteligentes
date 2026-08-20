@@ -31,17 +31,19 @@ def warn(name, detail=""):
 def section(title):
     print(f"\n--- {title} ---")
 
-section("1. Health Check")
-try:
-    r = requests.get(f"{BASE_URL}/", timeout=5)
-    check("Servidor responde en /", r.status_code == 200)
-    check("Respuesta contiene mensaje", "message" in r.json())
-except Exception as e:
-    check("Servidor responde en /", False, str(e))
-    print("ERROR CRITICO: Servidor no disponible. Abortando.")
-    sys.exit(1)
+def run_live_tests():
+    section("1. Health Check")
+    try:
+        r = requests.get(f"{BASE_URL}/", timeout=5)
+        check("Servidor responde en /", r.status_code == 200)
+        check("Respuesta contiene mensaje", "message" in r.json())
+    except Exception as e:
+        check("Servidor responde en /", False, str(e))
+        print("ERROR CRITICO: Servidor no disponible. Abortando.")
+        return
 
-section("2. Auth - Registro y Login")
+    section("2. Auth - Registro y Login")
+
 
 try:
     r = requests.post(f"{BASE_URL}/register", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
@@ -230,19 +232,22 @@ if TOKEN:
     except Exception as e:
         check("GET /wallet/history responde", False, str(e))
 
-# === RESUMEN FINAL ===
-total = results["pass"] + results["fail"] + results["warn"]
-score = (results["pass"] / max(total, 1)) * 100
-print(f"\n{'='*50}")
-print(f"RESUMEN FINAL: {total} tests")
-print(f"  PASS: {results['pass']}")
-print(f"  FAIL: {results['fail']}")  
-print(f"  WARN: {results['warn']}")
-print(f"  Score: {score:.1f}%")
-if failed_tests:
-    print(f"\nTests fallidos:")
-    for t in failed_tests:
-        print(f"  - {t}")
-print(f"{'='*50}")
+    # === RESUMEN FINAL ===
+    total = results["pass"] + results["fail"] + results["warn"]
+    score = (results["pass"] / max(total, 1)) * 100
+    print(f"\n{'='*50}")
+    print(f"RESUMEN FINAL: {total} tests")
+    print(f"  PASS: {results['pass']}")
+    print(f"  FAIL: {results['fail']}")  
+    print(f"  WARN: {results['warn']}")
+    print(f"  Score: {score:.1f}%")
+    if failed_tests:
+        print(f"\nTests fallidos:")
+        for t in failed_tests:
+            print(f"  - {t}")
+    print(f"{'='*50}")
+    sys.exit(0 if results["fail"] == 0 else 1)
 
-sys.exit(0 if results["fail"] == 0 else 1)
+if __name__ == "__main__":
+    run_live_tests()
+
