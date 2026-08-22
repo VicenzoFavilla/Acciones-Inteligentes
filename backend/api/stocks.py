@@ -5,6 +5,7 @@ import pandas as pd
 from services.stocks import get_stock_info, get_price_history, get_sp500_tickers
 from ml.recomendacion import smart_recommendation, basic_recommendation
 from ml.global_models import tickers_from_usage
+from agent.tools import get_ml_signal
 from config.db import get_db
 from core.logger import logger
 from api.auth import get_current_user
@@ -76,13 +77,25 @@ def predict_stock(ticker: str, period: str = "1mo"):
         else:
             interval = "1d"
         
+        info = get_stock_info(ticker_up)
         try:
             ml_res = smart_recommendation(ticker_up, registrar=True, model_type="global_xgb")
         except Exception as e:
-            logger.error(f"IA Error en predicción: {e}")
-            ml_res = "Analizando..."
+            logger.error(f"IA Error en predicción para {ticker_up}: {e}")
+            ml_res = None
 
-        info = get_stock_info(ticker_up)
+        # Un modelo global puede no estar instalado todavía. En vez de exponer
+        # el error técnico como recomendación, se entrega una regla de mercado
+        # simple hasta que el modelo esté disponible.
+        if not ml_res or ml_res.startswith((
+            "No hay modelo global",
+            "No hay suficientes datos",
+            "No se pudo entrenar",
+            "Error al predecir",
+        )):
+            logger.warning(f"Usando recomendación básica para {ticker_up}: modelo ML no disponible.")
+            ml_res = basic_recommendation(info.get("change") if info else None)
+
         history_df = get_price_history(ticker_up, period=period, interval=interval, full=True)
         ohlc_list = []
         history_list = []
@@ -140,6 +153,51 @@ def get_popular_stocks():
                 "history": history_list
             })
     return lista_populares
+
+
+@router.get("/opportunities")
+def get_market_opportunities(limit: int = Query(3, ge=1, le=5)):
+    """Devuelve señales ML breves para una pequeña selección de acciones líquidas.
+
+    Es una lista de exploración; no envía órdenes ni constituye una recomendación
+    personalizada. Limitarla evita cargar modelos y datos para todo el mercado.
+    """
+    candidates = ["NVDA", "AAPL", "MSFT", "GOOGL", "AMZN"][:limit]
+
+    def build_opportunity(ticker: str):
+        info = get_stock_info(ticker) or {}
+        signal = get_ml_signal(ticker)
+        history_data = get_price_history(ticker, period="7d")
+        history = []
+        if history_data is not None:
+            try:
+                history = [float(value) for value in history_data.tolist() if pd.notna(value)]
+            except (AttributeError, TypeError, ValueError):
+                history = []
+        confidence = float(signal.get("confidence", 0.5))
+        action = signal.get("signal", "HOLD")
+        change = float(info.get("change") or 0.0)
+        reason = (
+            f"Señal {action} del modelo con {confidence * 100:.0f}% de confianza; "
+            f"variación diaria {change:+.2f}%."
+        )
+        return {
+            "ticker": ticker,
+            "name": info.get("name", ticker),
+            "price": info.get("price", 0.0),
+            "change": change,
+            "signal": action,
+            "confidence": confidence,
+            "reason": reason,
+            "history": history,
+        }
+
+    with ThreadPoolExecutor(max_workers=limit) as executor:
+        opportunities = list(executor.map(build_opportunity, candidates))
+    return {
+        "items": opportunities,
+        "disclaimer": "Señales informativas; verificá el análisis antes de operar.",
+    }
 
 @router.get("/market")
 def get_market_list(search: Optional[str] = None, page: int = 1, page_size: int = 50):

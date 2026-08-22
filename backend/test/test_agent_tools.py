@@ -65,13 +65,14 @@ def test_tool_get_ml_signal_fallback():
         assert result["confidence"] == 0.5000
 
 
-def test_tool_get_market_news():
-    """Prueba la estructura retornada por get_market_news."""
+def test_tool_get_market_news_filters_by_ticker_and_translates_to_spanish():
+    """No expone noticias sectoriales y traduce las vinculadas al ticker."""
     mock_raw_news = [
         {
             "title": "NVDA Earnings Surge",
             "summary": "Nvidia reported record revenues across data center AI chips.",
             "publisher": "Reuters",
+            "relatedTickers": ["NVDA"],
             "providerPublishTime": 1700000000
         },
         {
@@ -85,15 +86,21 @@ def test_tool_get_market_news():
     mock_ticker = MagicMock()
     mock_ticker.news = mock_raw_news
 
-    with patch("yfinance.Ticker", return_value=mock_ticker):
+    translated_news = [{"title": "Las ganancias de NVDA se disparan", "summary": "Nvidia informó ingresos récord."}]
+    with patch("yfinance.Ticker", return_value=mock_ticker), \
+         patch("agent.tools._translate_news_to_spanish", side_effect=lambda news: [
+             {**news[0], **translated_news[0], "language": "es"}
+         ]):
         news = get_market_news("NVDA", limit=2)
-        assert len(news) == 2
+        assert len(news) == 1
         for item in news:
             assert "title" in item
             assert "summary" in item
             assert "source" in item
             assert "time_published" in item
             assert len(item["title"]) > 0
+            assert item["language"] == "es"
+        assert news[0]["title"] == "Las ganancias de NVDA se disparan"
 
 
 def test_tool_get_portfolio_status():

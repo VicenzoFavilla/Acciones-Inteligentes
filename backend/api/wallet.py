@@ -11,6 +11,8 @@ def wallet_info(current_user: dict = Depends(get_current_user)):
     wallet = get_wallet(current_user["email"])
     portfolio = wallet.get("portfolio", {})
     total_market_value = 0.0
+    daily_pnl = 0.0
+    previous_portfolio_value = 0.0
     detailed_portfolio = []
 
     for ticker, info in portfolio.items():
@@ -20,16 +22,24 @@ def wallet_info(current_user: dict = Depends(get_current_user)):
         current_price = current_data.get("price", avg_price) if current_data else avg_price
         cost_basis = qty * avg_price
         market_value = qty * current_price
+        daily_change_pct = current_data.get("change", 0.0) if current_data else 0.0
+        previous_price = current_price / (1 + (daily_change_pct / 100)) if daily_change_pct > -100 else current_price
         pnl_abs = market_value - cost_basis
         pnl_pct = (pnl_abs / cost_basis * 100) if cost_basis > 0 else 0.0
         total_market_value += market_value
+        previous_portfolio_value += qty * previous_price
+        daily_pnl += market_value - (qty * previous_price)
         detailed_portfolio.append({
             "ticker": ticker, "quantity": qty, "average_price": avg_price,
-            "current_price": current_price, "pnl_abs": pnl_abs, "pnl_pct": pnl_pct, "market_value": market_value
+            "current_price": current_price, "pnl_abs": pnl_abs, "pnl_pct": pnl_pct,
+            "market_value": market_value, "daily_change_pct": daily_change_pct
         })
 
     wallet["portfolio_details"] = detailed_portfolio
     wallet["total_equity"] = wallet["balance"] + total_market_value
+    previous_equity = wallet["balance"] + previous_portfolio_value
+    wallet["daily_pnl"] = daily_pnl
+    wallet["daily_pnl_pct"] = (daily_pnl / previous_equity * 100) if previous_equity else 0.0
     if "_id" in wallet: del wallet["_id"]
     return {"status": "success", "wallet": wallet}
 

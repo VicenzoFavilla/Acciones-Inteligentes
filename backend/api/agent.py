@@ -10,6 +10,7 @@ from api.deps import get_current_user
 from config.db import get_db
 from core.logger import logger
 from agent.orchestrator import run_financial_agent, AVAILABLE_TOOLS, SYSTEM_INSTRUCTION
+from agent.tools import get_market_news
 from services.wallet import buy_stock, sell_stock
 
 router = APIRouter(prefix="/agent", tags=["AI Agent"])
@@ -22,6 +23,26 @@ class AgentAnalysisRequest(BaseModel):
 
 class OrderApprovalRequest(BaseModel):
     notes: Optional[str] = Field(None, description="Notas u observaciones del usuario al aprobar")
+
+
+@router.get("/news/{ticker}")
+def get_agent_news(ticker: str, limit: int = Query(5, ge=1, le=20)):
+    """Expone el contexto noticioso verificado que utiliza el agente para un activo."""
+    ticker_clean = ticker.upper().strip()
+    if not ticker_clean or not ticker_clean.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=422, detail="Ticker inválido.")
+
+    try:
+        news = get_market_news(ticker_clean, limit=limit)
+        return {
+            "status": "success",
+            "ticker": ticker_clean,
+            "count": len(news),
+            "news": news,
+        }
+    except Exception as e:
+        logger.error(f"Error al obtener noticias del agente para {ticker_clean}: {e}")
+        raise HTTPException(status_code=502, detail="No se pudieron consultar noticias de mercado.")
 
 
 @router.post("/analyze")

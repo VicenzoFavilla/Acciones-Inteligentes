@@ -7,12 +7,15 @@ Implementación de las 4 herramientas especificadas en la Documentación Técnic
 4. place_trade_order(ticker: str, action: str, percentage_capital: float, email: str = "default_user@acciones.com") -> dict
 """
 
+import json
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from google import genai
+from google.genai import types
 
 from config.db import get_db
 from config.settings import settings
@@ -109,6 +112,76 @@ def get_ml_signal(ticker: str) -> dict:
 # TOOL 2: get_market_news
 # ==============================================================================
 
+def _is_news_for_ticker(item: Dict[str, Any], content: Dict[str, Any], ticker: str) -> bool:
+    """Acepta sólo noticias que Yahoo vincula al ticker o que lo nombran.
+
+    Yahoo puede mezclar titulares sectoriales en ``Ticker.news``.  No se
+    infiere la relación por palabras como "IA" o "semiconductores": si la
+    fuente no declara el ticker, el titular debe mencionarlo explícitamente.
+    """
+    related_tickers = []
+    for payload in (item, content):
+        values = payload.get("relatedTickers") or payload.get("related_tickers") or []
+        if isinstance(values, str):
+            values = [values]
+        if isinstance(values, list):
+            related_tickers.extend(str(value).upper() for value in values)
+
+    if ticker in related_tickers:
+        return True
+
+    title = str(content.get("title") or content.get("headline") or "")
+    summary = str(
+        content.get("summary") or content.get("description") or content.get("snippet") or ""
+    )
+    return ticker in f"{title} {summary}".upper()
+
+
+def _translate_news_to_spanish(news: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Traduce título y resumen en una sola petición a Gemini.
+
+    Si el servicio de traducción no está configurado o falla, se devuelve una
+    lista vacía para no mostrar contenido en otro idioma como si estuviera
+    traducido. La fuente, fecha y enlace se preservan sin cambios.
+    """
+    api_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logger.warning("No se muestran noticias: GEMINI_API_KEY no está configurada para traducirlas.")
+        return []
+
+    payload = [{"title": item["title"], "summary": item["summary"]} for item in news]
+    prompt = (
+        "Traduce al español neutro cada título y resumen financiero del JSON. "
+        "No agregues ni elimines elementos, conserva tickers, cifras y nombres propios. "
+        "Responde únicamente un JSON válido con la misma lista de objetos y las claves title y summary.\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0,
+            ),
+        )
+        translated = json.loads(response.text)
+        if not isinstance(translated, list) or len(translated) != len(news):
+            raise ValueError("La traducción no conserva la cantidad de noticias")
+
+        result = []
+        for original, translated_item in zip(news, translated):
+            title = translated_item.get("title") if isinstance(translated_item, dict) else None
+            summary = translated_item.get("summary") if isinstance(translated_item, dict) else None
+            if not isinstance(title, str) or not isinstance(summary, str):
+                raise ValueError("La traducción no contiene título y resumen válidos")
+            result.append({**original, "title": title, "summary": summary, "language": "es"})
+        return result
+    except Exception as exc:
+        logger.error(f"No se pudieron traducir las noticias al español: {exc}")
+        return []
+
 def get_market_news(ticker: str, limit: int = 5) -> list:
     """Recupera los titulares y resúmenes de noticias recientes relacionadas al activo.
 
@@ -122,6 +195,10 @@ def get_market_news(ticker: str, limit: int = 5) -> list:
         list: Lista de diccionarios con title, summary, source y time_published.
     """
     ticker_clean = ticker.upper().strip()
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 5
     logger.info(f"📰 [Tool get_market_news] Obteniendo noticias para {ticker_clean} (limit={limit})...")
     processed_news: List[Dict[str, Any]] = []
 
@@ -129,13 +206,15 @@ def get_market_news(ticker: str, limit: int = 5) -> list:
         stock = yf.Ticker(ticker_clean)
         raw_news = getattr(stock, "news", []) or []
 
-        # Filtrar noticias de las últimas 48 horas si tienen timestamp
         now = datetime.now(timezone.utc)
-        cutoff_time = now - timedelta(hours=48)
 
-        for item in raw_news[:limit]:
+        for item in raw_news:
+            if not isinstance(item, dict):
+                continue
             # Yahoo finance puede estructurar noticias en 'content' o dict directo
             content = item.get("content") if isinstance(item.get("content"), dict) else item
+            if not _is_news_for_ticker(item, content, ticker_clean):
+                continue
             
             title = content.get("title") or content.get("headline") or "Sin título disponible"
             summary = content.get("summary") or content.get("description") or content.get("snippet") or title
@@ -160,27 +239,33 @@ def get_market_news(ticker: str, limit: int = 5) -> list:
                 else:
                     time_published = now.isoformat()
 
+            link_data = content.get("canonicalUrl") or content.get("clickThroughUrl") or content.get("link")
+            if isinstance(link_data, dict):
+                link = link_data.get("url")
+            else:
+                link = link_data
+
             processed_news.append({
                 "title": title,
                 "summary": summary,
                 "source": source,
-                "time_published": time_published
+                "time_published": time_published,
+                "url": link,
             })
+            if len(processed_news) == limit:
+                break
 
     except Exception as e:
         logger.error(f"Error al obtener noticias para {ticker_clean}: {e}")
 
-    # Si no se obtuvieron noticias de la API, proveer un contexto sintético descriptivo
+    # No inventar noticias: una fuente inaccesible no equivale a un mercado sin eventos.
+    # El agente puede expresar explícitamente que no dispuso de contexto noticioso.
     if not processed_news:
-        processed_news.append({
-            "title": f"Actualización de Mercado para {ticker_clean}",
-            "summary": f"Actividad de trading regular para {ticker_clean} sin eventos extraordinarios recientes reportados.",
-            "source": "Market Feed",
-            "time_published": datetime.now(timezone.utc).isoformat()
-        })
+        logger.warning(f"No se encontraron noticias verificables para {ticker_clean}.")
 
-    logger.info(f"🗞️ [Tool get_market_news] {len(processed_news)} noticias recuperadas.")
-    return processed_news[:limit]
+    translated_news = _translate_news_to_spanish(processed_news)
+    logger.info(f"🗞️ [Tool get_market_news] {len(translated_news)} noticias de {ticker_clean} recuperadas y traducidas.")
+    return translated_news
 
 
 # ==============================================================================
@@ -380,4 +465,3 @@ AVAILABLE_TOOLS = {
     "get_portfolio_status": get_portfolio_status,
     "place_trade_order": place_trade_order
 }
-
