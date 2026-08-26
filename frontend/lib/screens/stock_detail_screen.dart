@@ -23,6 +23,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   bool isLoading = true;
   String _selectedPeriod = '1mo';
   Map<String, dynamic>? data;
+  List<dynamic> _news = [];
 
   @override
   void initState() {
@@ -43,8 +44,23 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         ApiConfig.buildUri('/predict/${widget.ticker}', {'period': p}),
       );
       if (response.statusCode == 200 && mounted) {
+        List<dynamic> latestNews = [];
+        try {
+          final newsResponse = await http.get(
+            ApiConfig.buildUri('/agent/news/${widget.ticker}', {'limit': 5}),
+          );
+          if (newsResponse.statusCode == 200) {
+            final newsPayload = json.decode(newsResponse.body) as Map<String, dynamic>;
+            latestNews = newsPayload['news'] is List
+                ? newsPayload['news'] as List<dynamic>
+                : [];
+          }
+        } catch (_) {
+          // La recomendación de precio debe seguir disponible si el feed falla.
+        }
         setState(() {
           data = json.decode(response.body);
+          _news = latestNews;
           isLoading = false;
         });
       }
@@ -130,6 +146,10 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
           ),
           const SizedBox(height: 15),
           _buildAIRecommendationCard(),
+          if (_news.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            _buildNewsSection(),
+          ],
           const SizedBox(height: 40),
           _buildDecisionButtons(),
         ],
@@ -199,11 +219,14 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             child: isPro
                 ? TradingViewChart(ticker: widget.ticker)
                 : processedCandles.length >= 2
-                ? Theme(
-                    data: ThemeData.dark(),
-                    child: Candlesticks(
-                      key: ValueKey("${widget.ticker}_$_selectedPeriod"),
-                      candles: processedCandles,
+                ? RepaintBoundary(
+                    // El hover sólo repinta el lienzo de velas, no toda la pantalla.
+                    child: Theme(
+                      data: ThemeData.dark(),
+                      child: Candlesticks(
+                        key: ValueKey("${widget.ticker}_$_selectedPeriod"),
+                        candles: processedCandles,
+                      ),
                     ),
                   )
                 : const Center(
@@ -271,7 +294,10 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         .toString()
         .toLowerCase();
 
-    bool isBuy = rawRec.contains("comprar");
+    // "no_comprar" también contiene "comprar"; tratarlo como una señal no alcista.
+    final bool isBuy = rawRec.contains("comprar") &&
+        !rawRec.contains("no_comprar") &&
+        !rawRec.contains("no comprar");
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -318,6 +344,49 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildNewsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Noticias analizadas por el agente',
+          style: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ..._news.map((item) {
+          final news = item is Map ? item : <String, dynamic>{};
+          return Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  (news['title'] ?? 'Sin título').toString(),
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  (news['source'] ?? 'Fuente no disponible').toString(),
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
     );
   }
 

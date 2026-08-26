@@ -34,8 +34,11 @@ Las herramientas son funciones nativas de Python que el agente invoca dinámicam
 * **Contras:** Requiere reentrenamiento periódico para evitar degradación de régimen; no contempla noticias de último momento de forma nativa.
 
 ### 2.2. `get_market_news(ticker: str, limit: int = 5) -> list[dict]`
-* **Propósito:** Recupera titulares, resúmenes, fuentes y marcas temporales de noticias recientes sobre el activo para evaluar el sentimiento del mercado y detectar riesgos no capturados.
-* **Retorno:** Lista de objetos con `title`, `summary`, `source`, `time_published`.
+* **Propósito:** Recupera titulares, resúmenes, fuentes y marcas temporales de noticias recientes sobre el activo seleccionado para evaluar el sentimiento del mercado y detectar riesgos no capturados.
+* **Filtrado estricto:** Yahoo Finance puede devolver titulares sectoriales aunque la consulta sea por ticker. La herramienta sólo conserva una noticia si Yahoo la etiqueta en `relatedTickers` con el símbolo solicitado o si el símbolo aparece de forma explícita en el título o resumen. Así, al seleccionar `NVDA` no se muestran noticias generales de tecnología o de otros activos.
+* **Idioma:** Antes de devolverlas, traduce en lote títulos y resúmenes a español neutro mediante Gemini; preserva fuente, fecha y URL. Cada elemento incluye `language: "es"`. Si la traducción no está disponible, no se devuelven titulares en otro idioma.
+* **Configuración necesaria:** Definir `GEMINI_API_KEY` en el archivo `.env` del backend (la misma clave ya utilizada por el agente). Sin esa clave, el feed queda vacío de forma intencional para mantener la garantía de idioma.
+* **Retorno:** Lista de objetos con `title`, `summary`, `source`, `time_published`, `url` y `language`.
 * **Pros:** Cubre el punto ciego cualitativo del modelo numérico ante eventos imprevistos; aporta explicabilidad humana al dictamen.
 * **Contras:** Sujeto a límites de cuota (rate limits); requiere filtrado para descartar ruido o titulares clickbait.
 
@@ -109,6 +112,19 @@ El agente opera bajo un bucle de control iterativo (*Agent Loop*) gobernado por 
 * `POST /agent/orders/{order_id}/approve` - Aprueba y ejecuta en la cartera una orden sugerida por la IA.
 * `POST /agent/orders/{order_id}/reject` - Descarta una orden generada por el agente.
 * `GET /agent/info` - Retorna las capacidades, herramientas y reglas del sistema del Agente Financiero.
+* `GET /agent/news/{ticker}?limit=5` - Devuelve exclusivamente noticias verificables del ticker indicado, traducidas a español.
+
+### Rendimiento del gráfico de velas
+
+La pantalla de detalle envuelve el gráfico nativo de velas en un `RepaintBoundary`. Al mover el cursor, el tooltip y las velas se redibujan dentro de ese límite gráfico, sin invalidar el resto del `SingleChildScrollView` (cabecera, análisis, noticias y botones). Esto reduce los bloqueos percibidos durante el hover, especialmente en períodos con muchas velas. El gráfico se recrea únicamente cuando cambian el ticker o el período, mediante su `ValueKey` existente.
+
+### Paginación del mercado
+
+`GET /market` admite `page` y `page_size` (50 por defecto) y devuelve `items`, `total_items`, `total_pages` y `current_page`. El inicio consulta una sola página por vez y presenta controles para avanzar o retroceder de a 50 acciones; por ejemplo, `1–50`, `51–100`, hasta terminar el universo disponible. Esto evita cargar y renderizar todo el mercado en la página inicial.
+
+### Inicio personalizado
+
+El dashboard presenta un resumen de cartera (`total_equity`, PnL diario y porcentaje diario), movimientos destacados de la página de mercado cargada, oportunidades basadas en la señal del modelo y una lista para continuar explorando. Las oportunidades reemplazan visualmente el bloque de acciones populares: cada tarjeta incluye minigráfico de siete días, precio, variación, señal `BUY`/`HOLD`/`SELL`, confianza y motivo breve. Esta última combina posiciones, favoritos, tickers vistos recientemente (guardados localmente) y acciones populares. `GET /opportunities` devuelve como máximo cinco señales informativas y nunca ejecuta órdenes; cada respuesta incluye un aviso para que el usuario valide el análisis antes de operar.
 
 ---
 
@@ -188,6 +204,8 @@ Para ejecutar los tests específicos del Agente Financiero:
 cd backend
 pytest test/test_agent_tools.py test/test_agent_orchestrator.py test/test_agent_api.py -v
 ```
+
+La prueba `test_tool_get_market_news_filters_by_ticker_and_translates_to_spanish` cubre específicamente que se descarte una noticia sectorial sin `NVDA` y que el resultado publicado sea español.
 
 ---
 
