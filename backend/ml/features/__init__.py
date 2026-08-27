@@ -1,4 +1,4 @@
-"""Módulo facade para retrocompatibilidad con imports existentes de ml.features."""
+"""Módulo de Feature Engineering y Procesamiento de Señales Técnicas."""
 
 from ml.features.technical import add_technical_indicators
 from ml.features.pipeline import (

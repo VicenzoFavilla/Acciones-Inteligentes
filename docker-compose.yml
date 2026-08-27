@@ -20,7 +20,9 @@ services:
       - acciones_net
 
   backend:
-    build: .
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: acciones_backend
     restart: unless-stopped
     ports:
@@ -37,6 +39,29 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    networks:
+      - acciones_net
+
+  # Servicio on-demand / batch para ejecutar el pipeline diario de ML y Backtesting
+  ml_pipeline:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: acciones_ml_pipeline
+    profiles:
+      - pipeline
+    environment:
+      - MONGO_URL=mongodb://root:example@mongodb:27017/acciones_ml?authSource=admin
+      - MODEL_DIR=/app/models
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=TEXT
+    volumes:
+      - models_data:/app/models
+      - reports_data:/app/reports
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: ["python", "scripts/daily_ml_pipeline.py", "--tickers", "AAPL MSFT GOOGL AMZN NVDA TSLA", "--period", "2y"]
     networks:
       - acciones_net
 

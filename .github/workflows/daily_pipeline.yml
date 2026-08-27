@@ -1,0 +1,71 @@
+name: Daily ML & Trading Pipeline
+
+on:
+  schedule:
+    # Lunes a Viernes a las 21:30 UTC (después del cierre del mercado en NYSE/NASDAQ)
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Tickers a procesar (separados por espacio)'
+        required: false
+        default: 'AAPL MSFT GOOGL AMZN NVDA TSLA'
+      period:
+        description: 'Periodo histórico para reentrenamiento/backtest'
+        required: false
+        default: '2y'
+
+jobs:
+  ml-pipeline:
+    name: Run Daily Ingestion, Inference & Backtesting
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Unit Tests
+        env:
+          MONGO_URL: mongodb://localhost:27017/acciones_test
+          SECRET_KEY: test_secret_key_ci_cd
+        run: |
+          python -m pytest backend/test/ -v
+
+      - name: Execute Daily ML Pipeline
+        env:
+          MONGO_URL: mongodb://localhost:27017/acciones_ml
+          SECRET_KEY: test_secret_key_ci_cd
+          PYTHONPATH: backend
+        run: |
+          python backend/scripts/daily_ml_pipeline.py --tickers "${{ github.event.inputs.tickers || 'AAPL MSFT GOOGL AMZN NVDA TSLA' }}" --period "${{ github.event.inputs.period || '2y' }}" --output-dir reports
+
+      - name: Upload Pipeline Reports and Metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-ml-metrics-${{ github.sha }}
+          path: |
+            reports/
+            models/
+          retention-days: 14

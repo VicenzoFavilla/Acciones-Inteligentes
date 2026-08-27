@@ -1,213 +1,228 @@
-# 📈 Acciones Inteligentes - Plataforma de Asesoramiento Financiero y Agentes de IA Autónomos
+# 📈 Acciones Inteligentes - Plataforma Cuantitativa, MLOps y Agentes Financieros Autónomos
 
-**Acciones Inteligentes** evoluciona de un sistema puramente cuantitativo basado en modelos de Machine Learning (XGBoost) hacia una **arquitectura híbrida orientada a Agentes Financieros Autónomos** impulsados por Large Language Models (**Google GenAI / Gemini 2.5 Flash**).
+[![CI/CD Daily Pipeline](https://github.com/vitif/Acciones-Inteligentes/actions/workflows/daily_pipeline.yml/badge.svg)](https://github.com/vitif/Acciones-Inteligentes/actions)
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-El ecosistema integra análisis de datos en tiempo real de Yahoo Finance, modelos predictivos de Machine Learning, extracción contextual de noticias financieras, control dinámico de riesgo de cartera, ejecución en Paper Trading con supervisión **Human-in-the-Loop (HITL)** y un backend moderno en **FastAPI** junto con un cliente interactivo en **Flutter**.
+**Acciones Inteligentes** es un ecosistema cuantitativo y de Machine Learning de grado profesional para análisis, predicción, simulación de backtesting y toma de decisiones en mercados financieros. 
 
----
-
-## 🏛️ 1. Visión General de la Arquitectura
-
-La arquitectura híbrida combina la precisión estadística de XGBoost con la capacidad contextual, de razonamiento y de ejecución de Gemini estructurado como agente financiero senior:
-
-| Componente | Tecnología / Herramienta | Responsabilidad Principal |
-| :--- | :--- | :--- |
-| **Capa Cuantitativa** | Python / XGBoost / Pandas | Generación de predicciones técnicas, cálculo de probabilidades ($P(\text{BUY})$) y señales cuantitativas (`BUY`, `SELL`, `HOLD`). |
-| **Capa Contextual** | Yahoo Finance News / Web Scraping | Captura de noticias del mercado, informes financieros y contexto cualitativo en tiempo real (últimas 24-48h). |
-| **Orquestador (Agente)** | Google GenAI SDK (`google-genai`) / Gemini 2.5 Flash | Sintetizar señales ML con contexto cualitativo, aplicar reglas de gestión de riesgo y tomar decisiones fundamentadas. |
-| **Ejecución & Gestión** | Broker API / Portfolio Manager / MongoDB | Validación de saldo disponible, límites de asignación de capital (máx. 10%), simulación Paper Trading y Human-in-the-Loop. |
+Combina modelos de gradiente potenciado (**XGBoost**), ingeniería de características técnicas de alta dimensionalidad (**ta / pandas-ta**), validación temporal sin filtraciones (**Walk-Forward / TimeSeriesSplit**), un simulador de **Backtesting** con comisiones y *slippage*, orquestación de **MLOps** mediante GitHub Actions y Docker, y una capa de razonamiento y ejecución con **Agentes Financieros Autónomos (Gemini 2.5 Flash + Human-in-the-Loop)**.
 
 ---
 
-## 🛠️ 2. Especificación Detallada de Herramientas (Tools)
+## 🏛️ Arquitectura del Sistema
 
-Las herramientas son funciones nativas de Python que el agente invoca dinámicamente mediante **Function Calling**:
+```mermaid
+graph TB
+    subgraph "1. Ingesta de Datos (Data Layer)"
+        YF[Yahoo Finance API] --> YF_Loader[YFinanceDataLoader]
+        MEM[Memory / Synthetic] --> MEM_Loader[MemoryDataLoader]
+        BASE[DataLoader Abstract Interface] -.-> YF_Loader
+        BASE -.-> MEM_Loader
+    end
 
-### 2.1. `get_ml_signal(ticker: str) -> dict`
-* **Propósito:** Inferencia cuantitativa utilizando el modelo XGBoost precargado y calibrado con 19 indicadores técnicos (RSI, MACD, Medias Móviles, Bandas de Bollinger, ATR, Estocástico).
-* **Mapeo de Señal:**
-  * Probabilidad $> 0.65 \longrightarrow \text{"BUY"}$
-  * Probabilidad $< 0.35 \longrightarrow \text{"SELL"}$
-  * $0.35 \le \text{Probabilidad} \le 0.65 \longrightarrow \text{"HOLD"}$
-* **Retorno:** `{"ticker": "NVDA", "signal": "BUY", "confidence": 0.8250}`
-* **Pros:** Base matemática objetiva libre de sesgo conversacional; respuesta ultra rápida e integración directa.
-* **Contras:** Requiere reentrenamiento periódico para evitar degradación de régimen; no contempla noticias de último momento de forma nativa.
+    subgraph "2. Feature Engineering & Procesamiento"
+        YF_Loader --> FE[Feature Engineering Engine]
+        FE --> BB[Bollinger Bands<br/>Width, %B, Dist]
+        FE --> ATR[ATR & Normalized ATR]
+        FE --> VWAP[VWAP & Volume Ratios]
+        FE --> VOL[Historical Volatility<br/>5d, 20d, Annualized]
+        FE --> OSC[RSI, MACD, Stoch, EMAs]
+    end
 
-### 2.2. `get_market_news(ticker: str, limit: int = 5) -> list[dict]`
-* **Propósito:** Recupera titulares, resúmenes, fuentes y marcas temporales de noticias recientes sobre el activo seleccionado para evaluar el sentimiento del mercado y detectar riesgos no capturados.
-* **Filtrado estricto:** Yahoo Finance puede devolver titulares sectoriales aunque la consulta sea por ticker. La herramienta sólo conserva una noticia si Yahoo la etiqueta en `relatedTickers` con el símbolo solicitado o si el símbolo aparece de forma explícita en el título o resumen. Así, al seleccionar `NVDA` no se muestran noticias generales de tecnología o de otros activos.
-* **Idioma:** Antes de devolverlas, traduce en lote títulos y resúmenes a español neutro mediante Gemini; preserva fuente, fecha y URL. Cada elemento incluye `language: "es"`. Si la traducción no está disponible, no se devuelven titulares en otro idioma.
-* **Configuración necesaria:** Definir `GEMINI_API_KEY` en el archivo `.env` del backend (la misma clave ya utilizada por el agente). Sin esa clave, el feed queda vacío de forma intencional para mantener la garantía de idioma.
-* **Retorno:** Lista de objetos con `title`, `summary`, `source`, `time_published`, `url` y `language`.
-* **Pros:** Cubre el punto ciego cualitativo del modelo numérico ante eventos imprevistos; aporta explicabilidad humana al dictamen.
-* **Contras:** Sujeto a límites de cuota (rate limits); requiere filtrado para descartar ruido o titulares clickbait.
+    subgraph "3. ML Validation & Backtesting Engine"
+        BB & ATR & VWAP & VOL & OSC --> SUP[Supervised Target Generator]
+        SUP --> TSCV[TimeSeriesSplit Validator<br/>Out-Of-Fold Evaluation]
+        TSCV --> XGB[XGBoost Classifier<br/>Dynamic Threshold Calibration]
+        XGB --> BTS[BacktestSimulator Engine<br/>Commissions & Slippage]
+        BTS --> KPI[Financial KPIs<br/>Sharpe, Sortino, MDD, Win Rate]
+    end
 
-### 2.3. `get_portfolio_status(email: str) -> dict`
-* **Propósito:** Proporciona visibilidad en tiempo real sobre el balance de efectivo (`cash_balance`), valuación de mercado total (`total_portfolio_value`) y desglose de posiciones abiertas con su PnL.
-* **Retorno:** `{"cash_balance": 10000.0, "total_portfolio_value": 11800.0, "positions": [...]}`
-* **Pros:** Permite al agente aplicar límites de capital y diversificación inteligente; previene órdenes técnicamente válidas pero financieramente inviables.
-* **Contras:** Requiere sincronización constante y consistencia con las transacciones del usuario.
+    subgraph "4. MLOps & Automatización"
+        GHA[GitHub Actions<br/>Daily Pipeline Workflow] --> SCRIPT[daily_ml_pipeline.py]
+        SCRIPT --> XGB
+        SCRIPT --> MONGO[(MongoDB 6.0<br/>Metrics & Models Cache)]
+        SCRIPT --> JSON_REP[JSON Daily Artifacts]
+        JSON_LOG[Structured JSON Logger] -.-> SCRIPT
+    end
 
-### 2.4. `place_trade_order(ticker: str, action: str, percentage_capital: float, email: str) -> dict`
-* **Propósito:** Simula o registra órdenes de compra/venta respetando las políticas de riesgo aprobadas.
-* **Regla de Riesgo:** Rechaza automáticamente cualquier operación que intente comprometer **más del 10% del capital total**.
-* **Retorno:** `{"transaction_id": "...", "ticker": "AAPL", "action": "BUY", "quantity": 5, "status": "pending_approval"}`
-* **Pros:** Automatización end-to-end desde el análisis hasta la generación de órdenes; reduce la latencia de ejecución.
-* **Contras:** Requiere manejo robusto de excepciones y control estricto de Human-in-the-Loop.
+    subgraph "5. Capa Agéntica & API"
+        API[FastAPI Backend :8001] --> ORCH[Gemini 2.5 Flash Agent Orchestrator]
+        ORCH --> ML_TOOL[get_ml_signal]
+        ORCH --> NEWS_TOOL[get_market_news]
+        ORCH --> PORT_TOOL[get_portfolio_status]
+        ORCH --> TRADE_TOOL[place_trade_order<br/>Risk Limit <= 10%]
+        API --> HITL[Human-in-the-Loop Approval]
+    end
 
----
-
-## 🤖 3. Grafo de Decisión del Agente y System Prompt
-
-El agente opera bajo un bucle de control iterativo (*Agent Loop*) gobernado por las siguientes **5 Reglas de Operación**:
-
-```text
-1. Siempre consulta la señal cuantitativa mediante 'get_ml_signal'.
-2. Si la señal es BUY o SELL, consulta noticias con 'get_market_news' para verificar si hay riesgos no capturados.
-3. Antes de ejecutar o recomendar una orden, revisa el portafolio con 'get_portfolio_status'.
-4. NUNCA asignes más del 10% del valor total del portafolio a una sola operación.
-5. Justifica claramente cada decisión con datos cuantitativos y cualitativos.
-```
-
-### Diagrama de Flujo del Grafo de Decisión
-
-```
-[Usuario / Consulta] ──> [Gemini 2.5 Flash Orchestrator]
-                               │
-            ┌──────────────────┴──────────────────┐
-            ▼                                     ▼
-   [get_ml_signal]                       [get_market_news]
- (Inferencia XGBoost)                  (Noticias de Mercado)
-            │                                     │
-            └──────────────────┬──────────────────┘
-                               ▼
-                    [get_portfolio_status]
-                   (Validación de Cartera)
-                               │
-                               ▼
-                    [place_trade_order]
-                 (Validación Regla <= 10%)
-                               │
-                               ▼
-                 [Human-in-the-Loop: Pendiente]
-                               │
-                               ▼
-                   [Dictamen Final Explicable]
+    subgraph "6. Cliente de Usuario"
+        CLIENT[Flutter UI / Web / Mobile] <--> API
+    end
 ```
 
 ---
 
-## 🔒 4. Aislamiento, Auditoría y Human-in-the-Loop
+## 🚀 Características Principales por Módulo
 
-1. **Lazy Loading de Modelos XGBoost (`ml_loader.py`):** Los modelos entrenados y los clasificadores globales se cargan en un singleton en memoria (`ModelCache`), eliminando la sobrecarga de I/O en cada consulta del agente.
-2. **Human-in-the-Loop (HITL):** Las órdenes sugeridas se crean en estado `pending_approval`. El usuario puede revisar la justificación y autorizar (`POST /agent/orders/{id}/approve`) o rechazar (`POST /agent/orders/{id}/reject`) la transacción.
-3. **Auditoría y Trazas (`agent_traces`):** Cada ejecución del agente almacena en MongoDB la traza completa de herramientas invocadas, argumentos, salidas y razonamiento generado para auditorías de cumplimiento y depuración.
+### 1. Robustez de Machine Learning & Backtesting
+* **Cero Data Leakage:** Reemplazo de divisiones aleatorias/estáticas por `TimeSeriesSplit` y validación *walk-forward* con métricas *Out-Of-Fold (OOF)*.
+* **Calibración Dinámica de Umbrales:** Optimización del umbral de probabilidad para maximizar el F1-Score en periodos fuera de muestra.
+* **Simulador de Trading Realista:** `BacktestSimulator` calcula retornos netos descontando comisiones de corretaje (`commission_pct`), deslizamiento (`slippage_pct`) y tamaño de posición.
+* **Métricas Financieras Cuantitativas:**
+  * **Sharpe Ratio & Sortino Ratio** (con tasa libre de riesgo anualizada configurable).
+  * **Maximum Drawdown (MDD)** y duración del drawdown.
+  * **Win Rate (%)** y **Profit Factor** (Gross Profits / Gross Losses).
+  * **CAGR** y **Volatilidad Anualizada**.
+  * Comparación directa contra el Benchmark pasivo (**Buy & Hold**).
 
----
+### 2. Feature Engineering Extensible
+* **Abstracción `DataLoader`:** Arquitectura desacoplada bajo el principio de Inversión de Dependencias (DIP) con soporte para `YFinanceDataLoader`, `MemoryDataLoader` y facilidad para agregar nuevos proveedores (AlphaVantage, Polygon, CSV).
+* **Indicadores Técnicos Avanzados (`ta`):**
+  * Bandas de Bollinger (`BB_High_Dist`, `BB_Low_Dist`, `BB_Width`, `BB_Pct`).
+  * Rango Verdadero Promedio (`ATR`, `ATR_Pct`).
+  * Precio Ponderado por Volumen (`VWAP`, `VWAP_Dist`).
+  * Volatilidad Histórica Móvil (`Volatility_5d`, `Volatility_20d`, `Hist_Vol_Ann`).
+  * Medias Móviles Exponenciales (`EMA5`, `EMA20`, `EMA50`), `RSI`, `MACD` y oscilador Estocástico.
 
-## 🌐 5. Endpoints de la API del Agente
+### 3. MLOps, CI/CD y Containerización
+* **GitHub Actions Workflow (`daily_pipeline.yml`):** Ejecuta diariamente tras el cierre del mercado la suite de pruebas automatizadas, reentrena/evalúa modelos y genera reportes de métricas.
+* **Logging Estructurado:** Salida configurable en formato `JSON` estructurado para observabilidad en la nube / producción y modo `TEXT` para desarrollo local.
+* **Docker Multi-Stage:** `Dockerfile` basado en Python 3.11-slim con usuario sin privilegios `appuser`, healthcheck integrado y `docker-compose.yml` para orquestar la API, MongoDB y los pipelines batch.
 
-* `POST /agent/analyze` - Ejecuta el análisis agéntico completo para un ticker (ej. `{"ticker": "NVDA"}`).
-* `GET /agent/traces` - Consulta el historial de trazas y decisiones del agente para auditoría.
-* `POST /agent/orders/{order_id}/approve` - Aprueba y ejecuta en la cartera una orden sugerida por la IA.
-* `POST /agent/orders/{order_id}/reject` - Descarta una orden generada por el agente.
-* `GET /agent/info` - Retorna las capacidades, herramientas y reglas del sistema del Agente Financiero.
-* `GET /agent/news/{ticker}?limit=5` - Devuelve exclusivamente noticias verificables del ticker indicado, traducidas a español.
-
-### Rendimiento del gráfico de velas
-
-La pantalla de detalle envuelve el gráfico nativo de velas en un `RepaintBoundary`. Al mover el cursor, el tooltip y las velas se redibujan dentro de ese límite gráfico, sin invalidar el resto del `SingleChildScrollView` (cabecera, análisis, noticias y botones). Esto reduce los bloqueos percibidos durante el hover, especialmente en períodos con muchas velas. El gráfico se recrea únicamente cuando cambian el ticker o el período, mediante su `ValueKey` existente.
-
-### Paginación del mercado
-
-`GET /market` admite `page` y `page_size` (50 por defecto) y devuelve `items`, `total_items`, `total_pages` y `current_page`. El inicio consulta una sola página por vez y presenta controles para avanzar o retroceder de a 50 acciones; por ejemplo, `1–50`, `51–100`, hasta terminar el universo disponible. Esto evita cargar y renderizar todo el mercado en la página inicial.
-
-### Inicio personalizado
-
-El dashboard presenta un resumen de cartera (`total_equity`, PnL diario y porcentaje diario), movimientos destacados de la página de mercado cargada, oportunidades basadas en la señal del modelo y una lista para continuar explorando. Las oportunidades reemplazan visualmente el bloque de acciones populares: cada tarjeta incluye minigráfico de siete días, precio, variación, señal `BUY`/`HOLD`/`SELL`, confianza y motivo breve. Esta última combina posiciones, favoritos, tickers vistos recientemente (guardados localmente) y acciones populares. `GET /opportunities` devuelve como máximo cinco señales informativas y nunca ejecuta órdenes; cada respuesta incluye un aviso para que el usuario valide el análisis antes de operar.
-
----
-
-## 📂 6. Estructura del Proyecto
-
-```text
-Acciones-Inteligentes/
-├── src/
-│   └── agent/                     # Módulo del Agente (Tools, Orchestrator, ML Loader)
-│       ├── __init__.py
-│       ├── tools.py               # Las 4 herramientas nativas
-│       ├── orchestrator.py        # Grafo de decisión y bucle GenAI
-│       └── ml_loader.py           # Lazy loading de XGBoost
-├── backend/
-│   ├── agent/                     # Paquete del agente integrado en el backend
-│   │   ├── tools.py
-│   │   ├── orchestrator.py
-│   │   └── ml_loader.py
-│   ├── api/
-│   │   ├── agent.py               # Endpoints REST del agente y HITL
-│   │   ├── auth.py, health.py, stocks.py, trading.py, wallet.py, websocket.py
-│   ├── config/                    # Base de datos y variables de entorno (Settings)
-│   ├── ml/                        # Motores XGBoost, features y entrenamiento
-│   ├── services/                  # Wallet, órdenes y Yahoo Finance
-│   ├── test/                      # Tests unitarios del agente y de la API
-│   ├── tests_consolidated.py      # Suite de pruebas consolidada (29 tests)
-│   └── main.py                    # Entrypoint de FastAPI
-├── requirements.txt               # Dependencias Python
-└── README.md                      # Documentación técnica completa
-```
+### 4. Agentes Autónomos con Human-in-the-Loop (HITL)
+* Inferencia cuantitativa asistida por **Gemini 2.5 Flash**.
+* Límite estricto de riesgo por operación ($\le 10\%$ del valor del portafolio).
+* Flujo de aprobación humana antes de ejecutar cualquier transacción en la cuenta de Paper Trading.
 
 ---
 
-## 🚀 7. Instalación y Configuración
+## 🐳 Guía Rápida de Instalación y Despliegue con Docker
 
-### 1. Requisitos Previos
-* Python 3.10+ (Recomendado **Python 3.12**)
-* Flutter SDK (para la aplicación móvil/escritorio)
-* MongoDB en ejecución local o remota.
+### Opción 1: Despliegue Completo con Docker Compose (Recomendado)
 
-### 2. Configurar el Backend y API Key
-```bash
-# 1. Crear y activar entorno virtual
-python -m venv entorno-v
-.\entorno-v\Scripts\activate       # Windows
-# source entorno-v/bin/activate    # Linux / macOS
+1. **Clonar el repositorio:**
+   ```bash
+   git clone https://github.com/vitif/Acciones-Inteligentes.git
+   cd Acciones-Inteligentes
+   ```
 
-# 2. Instalar dependencias
-pip install -r requirements.txt
+2. **Crear archivo de entorno `.env` en la raíz (o en `backend/.env`):**
+   ```env
+   MONGO_INITDB_ROOT_USERNAME=root
+   MONGO_INITDB_ROOT_PASSWORD=example
+   SECRET_KEY=tu_clave_secreta_jwt_super_segura
+   GEMINI_API_KEY=tu_api_key_de_gemini
+   LOG_LEVEL=INFO
+   LOG_FORMAT=JSON
+   ```
 
-# 3. Configurar API Key de Gemini en .env o entorno
-# GEMINI_API_KEY=tu_api_key_aqui
-```
+3. **Iniciar todos los servicios (MongoDB 6.0 + FastAPI Backend):**
+   ```bash
+   docker compose up -d --build
+   ```
 
-### 3. Iniciar el Servidor FastAPI
-```bash
-cd backend
-uvicorn main:app --reload --port 8001
-```
+4. **Verificar el estado del servicio:**
+   * Backend API: `http://localhost:8001`
+   * Documentación Swagger UI: `http://localhost:8001/docs`
+   * Health Check: `http://localhost:8001/api/health`
+
+5. **Ejecutar el Pipeline Diario de ML bajo demanda mediante Docker:**
+   ```bash
+   docker compose run --rm ml_pipeline
+   ```
 
 ---
 
-## 🧪 8. Pruebas Automatizadas
+### Opción 2: Instalación Local en Desarrollo
 
-La suite de pruebas unificada y consolidada valida todas las capas del sistema (Autenticación, Billeteras, Órdenes, Machine Learning, Tools del Agente, Grafo de Decisión y endpoints REST).
+1. **Crear y activar el entorno virtual:**
+   ```bash
+   # Windows
+   python -m venv entorno-v
+   .\entorno-v\Scripts\activate
 
-Para ejecutar la suite completa:
+   # Linux / macOS
+   python3 -m venv entorno-v
+   source entorno-v/bin/activate
+   ```
+
+2. **Instalar dependencias:**
+   ```bash
+   pip install --upgrade pip
+   pip install -r backend/requirements.txt
+   ```
+
+3. **Ejecutar el servidor local:**
+   ```bash
+   cd backend
+   uvicorn main:app --reload --port 8001
+   ```
+
+4. **Ejecutar el pipeline diario manual:**
+   ```bash
+   python backend/scripts/daily_ml_pipeline.py --tickers "AAPL MSFT GOOGL NVDA TSLA" --period "2y"
+   ```
+
+---
+
+## 🧪 Pruebas Automatizadas
+
+El proyecto cuenta con una **suite consolidada y unificada** que valida todos los componentes del sistema (API, Billeteras, Agente Autónomo, TimeSeriesSplit, Backtesting, DataLoader, Features y Pipeline Diario).
+
+Para ejecutar la suite completa de pruebas:
 
 ```bash
-cd backend
+# Desde el directorio backend
 pytest tests_consolidated.py -v
 ```
 
-Para ejecutar los tests específicos del Agente Financiero:
+### Resultados de la Suite Unificada:
+```text
+backend/tests_consolidated.py::test_health_check PASSED                  [  4%]
+backend/tests_consolidated.py::test_get_me_protected PASSED              [  9%]
+backend/tests_consolidated.py::test_market_data PASSED                   [ 14%]
+backend/tests_consolidated.py::test_wallet_logic PASSED                  [ 19%]
+backend/tests_consolidated.py::test_order_matcher PASSED                 [ 23%]
+backend/tests_consolidated.py::test_websocket_market PASSED              [ 28%]
+backend/tests_consolidated.py::test_register_normalization PASSED        [ 33%]
+backend/tests_consolidated.py::test_login_normalization PASSED           [ 38%]
+backend/tests_consolidated.py::test_agent_tools_ml_signal PASSED         [ 42%]
+backend/tests_consolidated.py::test_agent_tools_portfolio_risk_limit PASSED [ 47%]
+backend/tests_consolidated.py::test_agent_orchestrator_decision_loop PASSED [ 52%]
+backend/tests_consolidated.py::test_agent_endpoints_flow PASSED          [ 57%]
+backend/tests_consolidated.py::test_calculate_financial_metrics PASSED   [ 61%]
+backend/tests_consolidated.py::test_backtest_simulator_execution PASSED  [ 66%]
+backend/tests_consolidated.py::test_timeseries_validator PASSED          [ 71%]
+backend/tests_consolidated.py::test_train_and_backtest_pipeline_mocked PASSED [ 76%]
+backend/tests_consolidated.py::test_data_loader_factory_and_memory_loader PASSED [ 80%]
+backend/tests_consolidated.py::test_advanced_technical_indicators PASSED [ 85%]
+backend/tests_consolidated.py::test_pipeline_with_custom_dataloader PASSED [ 90%]
+backend/tests_consolidated.py::test_json_formatter_structure PASSED      [ 95%]
+backend/tests_consolidated.py::test_run_daily_pipeline_execution PASSED  [100%]
 
-```bash
-cd backend
-pytest test/test_agent_tools.py test/test_agent_orchestrator.py test/test_agent_api.py -v
+======================= 21 passed, 1 warning in 26.79s ========================
 ```
-
-La prueba `test_tool_get_market_news_filters_by_ticker_and_translates_to_spanish` cubre específicamente que se descarte una noticia sectorial sin `NVDA` y que el resultado publicado sea español.
 
 ---
 
-## ⚖️ Licencia
-Este proyecto está bajo la licencia MIT.
+## ⚠️ Disclaimer Financiero y Legal
+
+> ### 🛑 AVISO LEGAL IMPORTANTE / FINANCIAL DISCLAIMER
+> 
+> 1. **Propósito Exclusivamente Educativo y de Investigación:**  
+>    Este software, sus modelos de Machine Learning, simulaciones de backtesting, señales predictivas y los dictámenes generados por Agentes de Inteligencia Artificial han sido desarrollados con fines exclusivamente académicos, investigativos y de demostración tecnológica.
+> 
+> 2. **No Constituye Asesoramiento Financiero:**  
+>    Ningún contenido emitido por este sistema constituye una oferta, recomendación, solicitud o asesoramiento financiero personalizado, legal o tributario. Los mercados de valores y derivados implican riesgos significativos de pérdida de capital.
+> 
+> 3. **Rendimientos Pasados y Simulaciones:**  
+>    Los rendimientos pasados, las métricas de backtesting (Sharpe Ratio, Win Rate, CAGR, etc.) y las simulaciones cuantitativas no garantizan ni predicen de ninguna manera resultados futuros.
+> 
+> 4. **Limitación de Responsabilidad:**  
+>    Los autores y desarrolladores de este proyecto no asumen ninguna responsabilidad por decisiones de inversión, pérdidas directas o indirectas, o daños derivados del uso o interpretación de este software. Cualquier operación real en el mercado queda bajo la exclusiva responsabilidad y criterio del usuario.
+
+---
+
+## 📄 Licencia
+
+Este proyecto está distribuido bajo la Licencia **MIT**. Consulta el archivo `LICENSE` para más detalles.
